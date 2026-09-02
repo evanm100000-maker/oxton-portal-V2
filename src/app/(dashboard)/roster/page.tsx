@@ -23,16 +23,14 @@ export default function RosterCalendarPage() {
 
   const [selectedFlight, setSelectedFlight] = useState<any>(null);
 
-  const fetchFlights = () => {
+  const fetchFlightsAndUsers = () => {
     fetch('/api/flights')
       .then((res) => res.json())
       .then((data) => {
         if (data.flights) setFlights(data.flights);
         setLoading(false);
       });
-  };
 
-  const fetchUsers = () => {
     fetch('/api/admin/users')
       .then((res) => res.json())
       .then((data) => {
@@ -41,11 +39,27 @@ export default function RosterCalendarPage() {
   };
 
   useEffect(() => {
-    fetchFlights();
-    fetchUsers();
+    fetchFlightsAndUsers();
+    // Live Auto Refresh Polling every 3 seconds
+    const interval = setInterval(fetchFlightsAndUsers, 3000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleAllocation = async (flightId: number, status: 'ATTENDING' | 'UNSURE' | 'ABSENT') => {
+    // Optimistic Immediate UI Update
+    setFlights((prev) =>
+      prev.map((f) => {
+        if (f.id === flightId) {
+          return { ...f, my_status: status };
+        }
+        return f;
+      })
+    );
+
+    if (selectedFlight && selectedFlight.id === flightId) {
+      setSelectedFlight({ ...selectedFlight, my_status: status });
+    }
+
     try {
       const res = await fetch('/api/allocations', {
         method: 'POST',
@@ -53,13 +67,7 @@ export default function RosterCalendarPage() {
         body: JSON.stringify({ flight_id: flightId, status }),
       });
       if (res.ok) {
-        fetchFlights();
-        if (selectedFlight && selectedFlight.id === flightId) {
-          setSelectedFlight({
-            ...selectedFlight,
-            my_status: status
-          });
-        }
+        fetchFlightsAndUsers();
       }
     } catch (err) {
       console.error('Allocation update error:', err);
@@ -103,7 +111,7 @@ export default function RosterCalendarPage() {
             7-Day Flight Roster & Schedule
           </h1>
           <p className="text-slate-500 font-medium text-sm mt-0.5">
-            Click on any flight card in the 7-day schedule to allocate your attendance and view roster details.
+            Click on any flight card in the 7-day schedule to allocate your attendance in real time.
           </p>
         </div>
 

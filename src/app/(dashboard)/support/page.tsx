@@ -32,6 +32,9 @@ export default function SupportPage() {
 
   useEffect(() => {
     fetchTickets();
+    // Live Auto Refresh Polling every 2 seconds for ticket chat
+    const interval = setInterval(fetchTickets, 2000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleCreateTicket = async (e: React.FormEvent) => {
@@ -68,6 +71,9 @@ export default function SupportPage() {
     e.preventDefault();
     if (!activeTicketId || !replyMessage.trim()) return;
 
+    const currentText = replyMessage;
+    setReplyMessage('');
+
     try {
       const res = await fetch('/api/tickets', {
         method: 'POST',
@@ -75,12 +81,11 @@ export default function SupportPage() {
         body: JSON.stringify({
           action: 'reply',
           ticket_id: activeTicketId,
-          message: replyMessage,
+          message: currentText,
         }),
       });
 
       if (res.ok) {
-        setReplyMessage('');
         fetchTickets();
       }
     } catch (err) {
@@ -88,7 +93,7 @@ export default function SupportPage() {
     }
   };
 
-  const activeTicket = tickets.find((t) => t.id === activeTicketId);
+  const activeTicket = tickets.find((t) => Number(t.id) === Number(activeTicketId));
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
@@ -96,7 +101,7 @@ export default function SupportPage() {
         <div>
           <h1 className="text-3xl font-black text-slate-800 tracking-tight">High-Rank Support Center</h1>
           <p className="text-slate-500 font-medium text-sm mt-0.5">
-            Open a support ticket to get direct assistance from executive and administrative staff.
+            Open a support ticket to get direct live assistance from executive and administrative staff.
           </p>
         </div>
         <button
@@ -193,7 +198,7 @@ export default function SupportPage() {
                   key={t.id}
                   onClick={() => setActiveTicketId(t.id)}
                   className={`w-full text-left p-3 rounded-2xl transition-all border ${
-                    activeTicketId === t.id
+                    Number(activeTicketId) === Number(t.id)
                       ? 'bg-purple-50 border-purple-300 text-purple-900 shadow-sm font-bold'
                       : 'border-slate-100 hover:bg-purple-50/50 text-slate-700'
                   }`}
@@ -235,7 +240,7 @@ export default function SupportPage() {
 
               {/* Messages Thread */}
               <div className="flex-1 overflow-y-auto my-4 space-y-3 pr-2">
-                {activeTicket.messages.map((m: any) => {
+                {activeTicket.messages?.map((m: any) => {
                   const isStaff = m.sender_role === 'STAFF';
                   return (
                     <div key={m.id} className={`flex flex-col ${isStaff ? 'items-end' : 'items-start'}`}>

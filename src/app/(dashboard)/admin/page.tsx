@@ -123,9 +123,15 @@ export default function AdminPanelPage() {
 
   useEffect(() => {
     fetchAllAdminData();
+    // Live Auto Refresh Polling every 3 seconds for real-time admin sync
+    const interval = setInterval(fetchAllAdminData, 3000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleApproveSignup = async (userId: number, status: 'ACTIVE' | 'DECLINED') => {
+    // Optimistic UI Removal
+    setUsers((prev) => prev.filter((u) => u.id !== userId));
+
     const res = await fetch('/api/admin/users', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -178,7 +184,7 @@ export default function AdminPanelPage() {
     setSelectedFlight(flight);
     const initialMap: Record<number, 'PRESENT' | 'LATE' | 'ABSENT'> = {};
     activeStaff.forEach((s) => {
-      const existingAlloc = flight.allocations?.find((a: any) => a.user_id === s.id);
+      const existingAlloc = flight.allocations?.find((a: any) => Number(a.user_id) === Number(s.id));
       if (existingAlloc && existingAlloc.attendance_status && existingAlloc.attendance_status !== 'NONE') {
         initialMap[s.id] = existingAlloc.attendance_status;
       } else if (existingAlloc && existingAlloc.status === 'ATTENDING') {
@@ -283,6 +289,8 @@ export default function AdminPanelPage() {
 
   const handleToggleMaintenance = async () => {
     const nextState = !maintEnabled;
+    setMaintEnabled(nextState); // Immediate state update
+
     const res = await fetch('/api/admin/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -293,7 +301,6 @@ export default function AdminPanelPage() {
       }),
     });
     if (res.ok) {
-      setMaintEnabled(nextState);
       setFeedback(`Website Maintenance Mode turned ${nextState ? 'ON (Locked)' : 'OFF (Open)'}.`);
       fetchAllAdminData();
     }
@@ -334,8 +341,6 @@ export default function AdminPanelPage() {
 
   const pendingSignups = users.filter((u) => u.status === 'PENDING');
   const activeStaff = users.filter((u) => u.status === 'ACTIVE');
-
-  // QUOTA NON-COMPLIANT LIST ONLY (Only staff who haven't completed quota by Sunday midnight BST)
   const nonCompliantRoster = roster.filter((item) => !item.isCompliant && item.quota.statusBadge === 'ACTIVE');
 
   return (
@@ -354,7 +359,7 @@ export default function AdminPanelPage() {
               <div>
                 <h1 className="text-2xl font-black tracking-tight">Executive Admin Portal</h1>
                 <p className="text-purple-100 text-xs font-medium mt-0.5">
-                  High-Rank operations, signups, flight registers, LOAs, staff management, and system alerts.
+                  High-Rank operations, signups, flight registers, LOAs, staff management, and real-time alerts.
                 </p>
               </div>
             </div>
@@ -778,7 +783,7 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 5: QUOTA NON-COMPLIANCE ONLY (Only shows names if they haven't completed quota by Sunday midnight BST) */}
+      {/* TAB 5: QUOTA NON-COMPLIANCE ONLY */}
       {activeTab === 'ROSTER' && (
         <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
           <div className="border-b border-slate-100 pb-3">

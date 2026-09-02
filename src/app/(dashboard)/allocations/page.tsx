@@ -43,9 +43,35 @@ export default function AllocationsPage() {
 
   useEffect(() => {
     fetchUserAndFlights();
+    // Live Auto Refresh Polling every 3 seconds
+    const interval = setInterval(fetchUserAndFlights, 3000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleAllocation = async (flightId: number, status: 'ATTENDING' | 'UNSURE' | 'ABSENT') => {
+    // Optimistic Immediate State Update (No refresh required)
+    setFlights((prevFlights) =>
+      prevFlights.map((f) => {
+        if (f.id === flightId) {
+          const currentAllocations = f.allocations || [];
+          const otherAllocations = currentAllocations.filter((a: any) => Number(a.user_id) !== Number(user?.id));
+          const newAlloc = {
+            user_id: user?.id,
+            status,
+            preferred_name: user?.preferred_name,
+            roblox_username: user?.roblox_username,
+            role: user?.role,
+          };
+          return {
+            ...f,
+            my_status: status,
+            allocations: [...otherAllocations, newAlloc],
+          };
+        }
+        return f;
+      })
+    );
+
     try {
       const res = await fetch('/api/allocations', {
         method: 'POST',
@@ -64,9 +90,8 @@ export default function AllocationsPage() {
     setSelectedRegisterFlight(flight);
     const initialMap: Record<number, 'PRESENT' | 'LATE' | 'ABSENT'> = {};
 
-    // Initialize map from flight allocations
     activeStaff.forEach((s) => {
-      const existingAlloc = flight.allocations.find((a: any) => a.user_id === s.id);
+      const existingAlloc = flight.allocations.find((a: any) => Number(a.user_id) === Number(s.id));
       if (existingAlloc && existingAlloc.attendance_status && existingAlloc.attendance_status !== 'NONE') {
         initialMap[s.id] = existingAlloc.attendance_status;
       } else if (existingAlloc && existingAlloc.status === 'ATTENDING') {
@@ -96,11 +121,11 @@ export default function AllocationsPage() {
 
       if (res.ok) {
         setRegisterMsg('Flight attendance register saved successfully!');
+        fetchUserAndFlights();
         setTimeout(() => {
           setSelectedRegisterFlight(null);
           setRegisterMsg(null);
-          fetchUserAndFlights();
-        }, 1000);
+        }, 600);
       }
     } catch (err) {
       console.error('Register submit error:', err);
@@ -114,7 +139,7 @@ export default function AllocationsPage() {
       <div>
         <h1 className="text-3xl font-black text-slate-800 tracking-tight">Weekly Allocations</h1>
         <p className="text-slate-500 font-medium text-sm mt-0.5">
-          View upcoming flight schedules and allocate your availability. Times are automatically adjusted to your local timezone.
+          View upcoming flight schedules and allocate your availability in real time.
         </p>
       </div>
 
@@ -157,9 +182,8 @@ export default function AllocationsPage() {
                     </div>
                   </div>
 
-                  {/* Right Action Cluster: Allocation Buttons + Admin Register Button */}
+                  {/* Right Action Cluster */}
                   <div className="flex flex-wrap items-center gap-2">
-                    {/* Attendance Register Trigger next to Flight (For Admins) */}
                     {isAdmin && (
                       <button
                         onClick={() => openRegisterModal(flight)}
@@ -228,7 +252,6 @@ export default function AllocationsPage() {
                 {/* Expanded Roster Breakdown */}
                 {isExpanded && (
                   <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100 mt-3 grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                    {/* Attending Column */}
                     <div>
                       <h4 className="font-bold text-emerald-800 mb-2 border-b border-emerald-200 pb-1">Attending ({attending.length})</h4>
                       {attending.length === 0 ? (
@@ -245,7 +268,6 @@ export default function AllocationsPage() {
                       )}
                     </div>
 
-                    {/* Unsure Column */}
                     <div>
                       <h4 className="font-bold text-amber-800 mb-2 border-b border-amber-200 pb-1">Unsure ({unsure.length})</h4>
                       {unsure.length === 0 ? (
@@ -262,7 +284,6 @@ export default function AllocationsPage() {
                       )}
                     </div>
 
-                    {/* Absent Column */}
                     <div>
                       <h4 className="font-bold text-rose-800 mb-2 border-b border-rose-200 pb-1">Absent ({absent.length})</h4>
                       {absent.length === 0 ? (
@@ -286,7 +307,7 @@ export default function AllocationsPage() {
         </div>
       )}
 
-      {/* ATTENDANCE REGISTER MODAL (PRESENT, LATE, ABSENT) */}
+      {/* ATTENDANCE REGISTER MODAL */}
       {selectedRegisterFlight && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 max-w-xl w-full shadow-2xl border border-purple-100 space-y-4 text-slate-800">
@@ -314,7 +335,6 @@ export default function AllocationsPage() {
                       <div className="text-slate-500 text-[10px]">{u.role}</div>
                     </div>
 
-                    {/* Present / Late / Absent Radio Group */}
                     <div className="flex items-center gap-1 text-xs">
                       <button
                         type="button"
