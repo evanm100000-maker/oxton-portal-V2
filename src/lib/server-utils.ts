@@ -1,48 +1,43 @@
-import { getDb } from './db';
+import { getConsequencesList, getLOARequestsList, getAllocationsList, getFlightsList } from './firebase-db';
 
-export function getUserSuspension(userId: number) {
-  const db = getDb();
+export async function getUserSuspension(userId: number) {
+  const consequences = await getConsequencesList();
   const nowIso = new Date().toISOString();
 
-  const activeSuspension = db.prepare(`
-    SELECT * FROM consequences
-    WHERE user_id = ? AND type = 'SUSPENSION'
-      AND (expires_at IS NULL OR expires_at > ?)
-    ORDER BY created_at DESC
-    LIMIT 1
-  `).get(userId, nowIso) as any;
+  const userSuspensions = consequences
+    .filter((c: any) => Number(c.user_id) === Number(userId) && c.type === 'SUSPENSION')
+    .filter((c: any) => !c.expires_at || c.expires_at > nowIso)
+    .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-  if (!activeSuspension) return null;
+  if (userSuspensions.length === 0) return null;
 
+  const active = userSuspensions[0];
   return {
     is_suspended: true,
-    reason: activeSuspension.reason,
-    notes: activeSuspension.notes,
-    expires_at: activeSuspension.expires_at,
+    reason: active.reason,
+    notes: active.notes,
+    expires_at: active.expires_at,
   };
 }
 
-export function getUserActiveLOA(userId: number) {
-  const db = getDb();
+export async function getUserActiveLOA(userId: number) {
+  const requests = await getLOARequestsList();
   const today = new Date().toISOString().split('T')[0];
 
-  const active = db.prepare(`
-    SELECT * FROM loa_requests
-    WHERE user_id = ? AND status = 'APPROVED'
-      AND start_date <= ? AND end_date >= ?
-    ORDER BY id DESC
-    LIMIT 1
-  `).get(userId, today, today) as any;
+  const active = requests
+    .filter((r: any) => Number(r.user_id) === Number(userId) && r.status === 'APPROVED')
+    .filter((r: any) => r.start_date <= today && r.end_date >= today)
+    .sort((a: any, b: any) => Number(b.id) - Number(a.id));
 
-  return active || null;
+  return active.length > 0 ? active[0] : null;
 }
 
-export function getUserQuotaInfo(userId: number) {
-  const db = getDb();
+export async function getUserQuotaInfo(userId: number) {
+  const allocations = await getAllocationsList();
+  const flights = await getFlightsList();
 
-  // Get start of current week in BST (Monday 00:00:00)
   const now = new Date();
-  const dayOfWeek = now.getUTCDay(); // 0 is Sun, 1 is Mon
+  const dayOfWeek = now.getUTCDay();
   const distToMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
 
   const mon = new Date(now);
@@ -51,18 +46,19 @@ export function getUserQuotaInfo(userId: number) {
 
   const startOfWeekIso = mon.toISOString();
 
-  // Count attended flights this week where attendance_status = PRESENT or LATE or attended = 1
-  const attendedCount = db.prepare(`
-    SELECT COUNT(*) as count
-    FROM flight_allocations fa
-    JOIN flights f ON fa.flight_id = f.id
-    WHERE fa.user_id = ?
-      AND (fa.attended = 1 OR fa.attendance_status IN ('PRESENT', 'LATE'))
-      AND f.datetime_utc >= ?
-  `).get(userId, startOfWeekIso) as { count: number };
+  const userAllocations = allocations.filter(
+    (a: any) => Number(a.user_id) === Number(userId) && (a.attended === 1 || ['PRESENT', 'LATE'].includes(a.attendance_status))
+  );
 
-  const completedThisWeek = attendedCount ? attendedCount.count : 0;
-  const activeLoa = getUserActiveLOA(userId);
+  let completedThisWeek = 0;
+  for (const alloc of userAllocations) {
+    const flight = flights.find((f: any) => Number(f.id) === Number(alloc.flight_id));
+    if (flight && flight.datetime_utc >= startOfWeekIso) {
+      completedThisWeek++;
+    }
+  }
+
+  const activeLoa = await getUserActiveLOA(userId);
 
   let requiredQuota = 3;
   let statusBadge = 'ACTIVE';

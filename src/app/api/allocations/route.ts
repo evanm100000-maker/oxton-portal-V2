@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { getDb } from '@/lib/db';
+import { saveAllocation } from '@/lib/firebase-db';
 
 export async function POST(request: Request) {
   const user = await getCurrentUser();
@@ -11,22 +11,18 @@ export async function POST(request: Request) {
   try {
     const { flight_id, status } = await request.json();
 
-    if (!flight_id || !['ATTENDING', 'UNSURE', 'ABSENT'].includes(status)) {
-      return NextResponse.json({ error: 'Invalid allocation parameter' }, { status: 400 });
+    if (!flight_id || !status) {
+      return NextResponse.json({ error: 'Flight ID and status required' }, { status: 400 });
     }
 
-    const db = getDb();
-    db.prepare(`
-      INSERT INTO flight_allocations (flight_id, user_id, status, updated_at)
-      VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(flight_id, user_id) DO UPDATE SET
-        status = excluded.status,
-        updated_at = CURRENT_TIMESTAMP
-    `).run(flight_id, user.id, status);
+    if (!['ATTENDING', 'UNSURE', 'ABSENT'].includes(status)) {
+      return NextResponse.json({ error: 'Invalid allocation status' }, { status: 400 });
+    }
 
-    return NextResponse.json({ success: true, status });
-  } catch (err) {
-    console.error('Error setting allocation:', err);
-    return NextResponse.json({ error: 'Failed to update allocation' }, { status: 500 });
+    await saveAllocation(Number(flight_id), Number(user.id), status);
+
+    return NextResponse.json({ success: true });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Failed to update allocation' }, { status: 500 });
   }
 }

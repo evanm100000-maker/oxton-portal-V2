@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { getDb } from '@/lib/db';
+import { getUsersList, updateUser, createNotification } from '@/lib/firebase-db';
 import { getUserQuotaInfo } from '@/lib/server-utils';
 
 export async function GET() {
@@ -9,17 +9,14 @@ export async function GET() {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  const db = getDb();
-  const users = db.prepare(`
-    SELECT id, email, preferred_name, roblox_username, discord_username, role, status, created_at
-    FROM users
-    ORDER BY created_at DESC
-  `).all() as any[];
+  const users = await getUsersList();
 
-  const usersWithQuota = users.map((u) => ({
-    ...u,
-    quota: getUserQuotaInfo(u.id)
-  }));
+  const usersWithQuota = await Promise.all(
+    users.map(async (u: any) => ({
+      ...u,
+      quota: await getUserQuotaInfo(u.id)
+    }))
+  );
 
   return NextResponse.json({ users: usersWithQuota });
 }
@@ -33,7 +30,6 @@ export async function PUT(request: Request) {
   try {
     const body = await request.json();
     const { action, target_user_id } = body;
-    const db = getDb();
 
     if (action === 'approval') {
       const { status } = body;
@@ -41,16 +37,13 @@ export async function PUT(request: Request) {
         return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
       }
 
-      db.prepare(`UPDATE users SET status = ? WHERE id = ?`).run(status, target_user_id);
+      await updateUser(Number(target_user_id), { status });
 
-      db.prepare(`
-        INSERT INTO notifications (user_id, title, message, type)
-        VALUES (?, ?, ?, ?)
-      `).run(
-        target_user_id,
+      await createNotification(
+        Number(target_user_id),
         `Account Request ${status === 'ACTIVE' ? 'Approved' : 'Declined'}`,
         status === 'ACTIVE'
-          ? 'Your registration request has been approved! Welcome to the Oxton Staff Portal.'
+          ? 'Your registration request has been approved! Welcome to the Luma Airways Staff Portal.'
           : 'Your registration request was declined.',
         status === 'ACTIVE' ? 'SUCCESS' : 'WARNING'
       );
@@ -70,18 +63,17 @@ export async function PUT(request: Request) {
         return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
       }
 
-      const targetUser = db.prepare(`SELECT role FROM users WHERE id = ?`).get(target_user_id) as any;
+      const users = await getUsersList();
+      const targetUser = users.find((u) => Number(u.id) === Number(target_user_id));
+
       if (targetUser?.role === 'FOUNDER') {
         return NextResponse.json({ error: 'Founder role cannot be modified' }, { status: 400 });
       }
 
-      db.prepare(`UPDATE users SET role = ? WHERE id = ?`).run(role, target_user_id);
+      await updateUser(Number(target_user_id), { role });
 
-      db.prepare(`
-        INSERT INTO notifications (user_id, title, message, type)
-        VALUES (?, ?, ?, 'INFO')
-      `).run(
-        target_user_id,
+      await createNotification(
+        Number(target_user_id),
         'Role Updated',
         `Your portal role has been updated to ${role} by the Founder.`
       );
@@ -90,8 +82,8 @@ export async function PUT(request: Request) {
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
-  } catch (err) {
+  } catch (err: any) {
     console.error('Admin user update error:', err);
-    return NextResponse.json({ error: 'Failed to update user' }, { status: 500 });
+    return NextResponse.json({ error: err.message || 'Failed to update user' }, { status: 500 });
   }
 }

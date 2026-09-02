@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { getDb } from '@/lib/db';
+import { getLOARequestsList, createLOARequest, updateLOARequest, getUsersList, createNotification } from '@/lib/firebase-db';
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -8,27 +8,24 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const db = getDb();
-  let requests: any[];
+  const list = await getLOARequestsList();
+  const users = await getUsersList();
+
+  const enriched = list.map((r: any) => {
+    const u = users.find((usr: any) => Number(usr.id) === Number(r.user_id));
+    return {
+      ...r,
+      preferred_name: u?.preferred_name || 'Staff Member',
+      roblox_username: u?.roblox_username || 'Unknown'
+    };
+  });
 
   if (user.role === 'ADMIN' || user.role === 'FOUNDER') {
-    requests = db.prepare(`
-      SELECT l.*, u.preferred_name, u.roblox_username, u.role as user_role
-      FROM loa_requests l
-      JOIN users u ON l.user_id = u.id
-      ORDER BY l.created_at DESC
-    `).all();
-  } else {
-    requests = db.prepare(`
-      SELECT l.*, u.preferred_name, u.roblox_username
-      FROM loa_requests l
-      JOIN users u ON l.user_id = u.id
-      WHERE l.user_id = ?
-      ORDER BY l.created_at DESC
-    `).all(user.id);
+    return NextResponse.json({ requests: enriched });
   }
 
-  return NextResponse.json({ requests });
+  const userRequests = enriched.filter((r: any) => Number(r.user_id) === Number(user.id));
+  return NextResponse.json({ requests: userRequests });
 }
 
 export async function POST(request: Request) {
@@ -40,60 +37,56 @@ export async function POST(request: Request) {
   try {
     const { type, reason, start_date, end_date } = await request.json();
 
-    if (!type || !['LOA', 'REDUCED_ACTIVITY'].includes(type) || !reason || !start_date || !end_date) {
-      return NextResponse.json({ error: 'Invalid or missing fields' }, { status: 400 });
+    if (!type || !reason || !start_date || !end_date) {
+      return NextResponse.json({ error: 'All fields are required' }, { status: 400 });
     }
 
-    const db = getDb();
-    const res = db.prepare(`
-      INSERT INTO loa_requests (user_id, type, reason, start_date, end_date, status)
-      VALUES (?, ?, ?, ?, ?, 'PENDING')
-    `).run(user.id, type, reason.trim(), start_date, end_date);
+    const newReq = await createLOARequest({
+      user_id: user.id,
+      type,
+      reason,
+      start_date,
+      end_date,
+      status: 'PENDING'
+    });
 
-    return NextResponse.json({ success: true, id: Number(res.lastInsertRowid) });
-  } catch (err) {
-    console.error('LOA request error:', err);
-    return NextResponse.json({ error: 'Failed to submit request' }, { status: 500 });
+    return NextResponse.json({ request: newReq });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Failed to submit LOA request' }, { status: 500 });
   }
 }
 
 export async function PUT(request: Request) {
   const user = await getCurrentUser();
   if (!user || (user.role !== 'ADMIN' && user.role !== 'FOUNDER')) {
-    return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   try {
     const { id, status, admin_notes } = await request.json();
 
-    if (!id || !['APPROVED', 'DECLINED'].includes(status)) {
-      return NextResponse.json({ error: 'Invalid parameters' }, { status: 400 });
+    if (!id || !status) {
+      return NextResponse.json({ error: 'ID and status required' }, { status: 400 });
     }
 
-    const db = getDb();
-    db.prepare(`
-      UPDATE loa_requests
-      SET status = ?, admin_notes = ?
-      WHERE id = ?
-    `).run(status, admin_notes || '', id);
+    const requests = await getLOARequestsList();
+    const targetReq = requests.find((r: any) => Number(r.id) === Number(id));
 
-    // Notify user
-    const loaReq = db.prepare(`SELECT user_id, type FROM loa_requests WHERE id = ?`).get(id) as any;
-    if (loaReq) {
-      db.prepare(`
-        INSERT INTO notifications (user_id, title, message, type)
-        VALUES (?, ?, ?, ?)
-      `).run(
-        loaReq.user_id,
-        `LOA Request ${status}`,
-        `Your request for ${loaReq.type} has been ${status.toLowerCase()}.${admin_notes ? ` Note: ${admin_notes}` : ''}`,
-        status === 'APPROVED' ? 'SUCCESS' : 'WARNING'
-      );
+    if (!targetReq) {
+      return NextResponse.json({ error: 'LOA request not found' }, { status: 404 });
     }
+
+    await updateLOARequest(Number(id), { status, admin_notes: admin_notes || null });
+
+    await createNotification(
+      Number(targetReq.user_id),
+      `LOA Request ${status}`,
+      `Your ${targetReq.type} application for ${targetReq.start_date} to ${targetReq.end_date} has been ${status.toLowerCase()}.`,
+      status === 'APPROVED' ? 'SUCCESS' : 'WARNING'
+    );
 
     return NextResponse.json({ success: true });
-  } catch (err) {
-    console.error('LOA update error:', err);
-    return NextResponse.json({ error: 'Failed to update LOA status' }, { status: 500 });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Failed to update LOA request' }, { status: 500 });
   }
 }

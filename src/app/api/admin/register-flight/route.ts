@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { getDb } from '@/lib/db';
+import { getFlightsList, updateFlight, saveAllocation, createNotification } from '@/lib/firebase-db';
 
 export async function POST(request: Request) {
   const user = await getCurrentUser();
@@ -15,36 +15,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Flight ID and attendance map required' }, { status: 400 });
     }
 
-    const db = getDb();
-    const flight = db.prepare(`SELECT * FROM flights WHERE id = ?`).get(flight_id) as any;
+    const flights = await getFlightsList();
+    const flight = flights.find((f: any) => Number(f.id) === Number(flight_id));
+
     if (!flight) {
       return NextResponse.json({ error: 'Flight not found' }, { status: 404 });
     }
 
-    db.prepare(`UPDATE flights SET status = 'COMPLETED' WHERE id = ?`).run(flight_id);
+    await updateFlight(Number(flight_id), { status: 'COMPLETED' });
 
     let processedCount = 0;
     for (const [userIdStr, status] of Object.entries(attendance_map)) {
       const userId = Number(userIdStr);
       const isAttended = (status === 'PRESENT' || status === 'LATE') ? 1 : 0;
 
-      db.prepare(`
-        INSERT INTO flight_allocations (flight_id, user_id, status, attendance_status, attended, updated_at)
-        VALUES (?, ?, 'ATTENDING', ?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(flight_id, user_id) DO UPDATE SET
-          attendance_status = excluded.attendance_status,
-          attended = excluded.attended,
-          updated_at = CURRENT_TIMESTAMP
-      `).run(flight_id, userId, status, isAttended);
-
+      await saveAllocation(Number(flight_id), userId, 'ATTENDING', status as string);
       processedCount++;
 
-      // Send Notification
       const statusTitle = status === 'PRESENT' ? 'Present' : status === 'LATE' ? 'Late' : 'Absent';
-      db.prepare(`
-        INSERT INTO notifications (user_id, title, message, type)
-        VALUES (?, ?, ?, ?)
-      `).run(
+      await createNotification(
         userId,
         `Flight Attendance Recorded: ${statusTitle}`,
         `Attendance registered for flight ${flight.flight_code}: Marked as ${statusTitle}.`,
@@ -53,8 +42,8 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ success: true, count: processedCount });
-  } catch (err) {
+  } catch (err: any) {
     console.error('Flight register error:', err);
-    return NextResponse.json({ error: 'Failed to process attendance register' }, { status: 500 });
+    return NextResponse.json({ error: err.message || 'Failed to process attendance register' }, { status: 500 });
   }
 }

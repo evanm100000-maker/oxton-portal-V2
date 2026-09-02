@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { getUserByEmail } from '@/lib/firebase-db';
 import { createToken, comparePassword } from '@/lib/auth';
 import { getUserSuspension } from '@/lib/server-utils';
 
@@ -11,8 +11,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
     }
 
-    const db = getDb();
-    const user = db.prepare(`SELECT * FROM users WHERE email = ?`).get(email) as any;
+    const user = await getUserByEmail(email);
 
     if (!user) {
       return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 });
@@ -36,7 +35,7 @@ export async function POST(request: Request) {
     }
 
     // Check Suspension
-    const suspension = getUserSuspension(user.id);
+    const suspension = await getUserSuspension(user.id);
     if (suspension && user.role !== 'FOUNDER') {
       const expiresFormatted = suspension.expires_at
         ? new Date(suspension.expires_at).toLocaleString()
@@ -50,7 +49,7 @@ export async function POST(request: Request) {
     }
 
     const token = createToken({
-      id: user.id,
+      id: Number(user.id),
       email: user.email,
       role: user.role,
       status: user.status,
@@ -62,7 +61,7 @@ export async function POST(request: Request) {
     const response = NextResponse.json({
       message: 'Login successful',
       user: {
-        id: user.id,
+        id: Number(user.id),
         email: user.email,
         preferred_name: user.preferred_name,
         roblox_username: user.roblox_username,
@@ -74,13 +73,13 @@ export async function POST(request: Request) {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 7 days
+      maxAge: 60 * 60 * 24 * 7,
       path: '/',
     });
 
     return response;
-  } catch (err) {
+  } catch (err: any) {
     console.error('Login API error:', err);
-    return NextResponse.json({ error: 'Authentication failed' }, { status: 500 });
+    return NextResponse.json({ error: err.message || 'Authentication failed' }, { status: 500 });
   }
 }

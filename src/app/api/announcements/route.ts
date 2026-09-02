@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { getDb } from '@/lib/db';
+import { getAnnouncementsList, createAnnouncement, getUsersList } from '@/lib/firebase-db';
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -8,15 +8,19 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const db = getDb();
-  const announcements = db.prepare(`
-    SELECT a.*, u.preferred_name as author_name, u.role as author_role
-    FROM announcements a
-    JOIN users u ON a.author_id = u.id
-    ORDER BY a.created_at DESC
-  `).all();
+  const list = await getAnnouncementsList();
+  const users = await getUsersList();
 
-  return NextResponse.json({ announcements });
+  const enriched = list.map((a: any) => {
+    const author = users.find((usr: any) => Number(usr.id) === Number(a.author_id));
+    return {
+      ...a,
+      author_name: author?.preferred_name || a.author_name || 'Management',
+      author_role: author?.role || a.author_role || 'ADMIN'
+    };
+  });
+
+  return NextResponse.json({ announcements: enriched });
 }
 
 export async function POST(request: Request) {
@@ -29,18 +33,19 @@ export async function POST(request: Request) {
     const { title, content } = await request.json();
 
     if (!title || !content) {
-      return NextResponse.json({ error: 'Title and content are required' }, { status: 400 });
+      return NextResponse.json({ error: 'Title and content required' }, { status: 400 });
     }
 
-    const db = getDb();
-    const res = db.prepare(`
-      INSERT INTO announcements (author_id, title, content)
-      VALUES (?, ?, ?)
-    `).run(user.id, title.trim(), content.trim());
+    const ann = await createAnnouncement({
+      author_id: user.id,
+      author_name: user.preferred_name,
+      author_role: user.role,
+      title,
+      content,
+    });
 
-    return NextResponse.json({ success: true, id: Number(res.lastInsertRowid) });
-  } catch (err) {
-    console.error('Announcement creation error:', err);
-    return NextResponse.json({ error: 'Failed to create announcement' }, { status: 500 });
+    return NextResponse.json({ announcement: ann });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Failed to create announcement' }, { status: 500 });
   }
 }

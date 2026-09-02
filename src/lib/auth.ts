@@ -1,9 +1,9 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { getDb } from './db';
+import { getUserById } from './firebase-db';
 import { cookies } from 'next/headers';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'oxton-portal-super-secret-key-2026';
+const JWT_SECRET = process.env.JWT_SECRET || 'luma-portal-super-secret-key-2026';
 
 export interface UserPayload {
   id: number;
@@ -44,14 +44,18 @@ export async function getCurrentUser(): Promise<UserPayload | null> {
   const payload = verifyToken(token);
   if (!payload) return null;
 
-  // Refresh user data from DB to ensure status and role are current
-  const db = getDb();
-  const stmt = db.prepare(`SELECT id, email, preferred_name, roblox_username, discord_username, role, status FROM users WHERE id = ?`);
-  const freshUser = stmt.get(payload.id) as UserPayload | undefined;
-
+  const freshUser = await getUserById(payload.id);
   if (!freshUser || freshUser.status !== 'ACTIVE') {
     return null;
   }
 
-  return freshUser;
+  return {
+    id: Number(freshUser.id),
+    email: freshUser.email,
+    role: freshUser.role,
+    status: freshUser.status,
+    preferred_name: freshUser.preferred_name,
+    roblox_username: freshUser.roblox_username,
+    discord_username: freshUser.discord_username,
+  };
 }

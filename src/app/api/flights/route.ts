@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { getDb } from '@/lib/db';
+import { getFlightsList, createFlight, getAllocationsList, getUsersList } from '@/lib/firebase-db';
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -8,53 +8,58 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const db = getDb();
-  const flights = db.prepare(`SELECT * FROM flights ORDER BY datetime_utc DESC`).all() as any[];
+  const flights = await getFlightsList();
+  const allocations = await getAllocationsList();
+  const users = await getUsersList();
 
-  const allocationsStmt = db.prepare(`
-    SELECT fa.flight_id, fa.status, fa.attended, u.id as user_id, u.preferred_name, u.roblox_username, u.role
-    FROM flight_allocations fa
-    JOIN users u ON fa.user_id = u.id
-    WHERE u.status = 'ACTIVE'
-  `);
-  const allAllocations = allocationsStmt.all() as any[];
+  const enrichedFlights = flights.map((flight: any) => {
+    const flightAllocations = allocations.filter((a: any) => Number(a.flight_id) === Number(flight.id));
 
-  const flightsWithDetails = flights.map((flight) => {
-    const flightAllocations = allAllocations.filter((a) => a.flight_id === flight.id);
-    const myAllocation = flightAllocations.find((a) => a.user_id === user.id);
+    const enrichedAllocations = flightAllocations.map((alloc: any) => {
+      const u = users.find((usr: any) => Number(usr.id) === Number(alloc.user_id));
+      return {
+        ...alloc,
+        preferred_name: u?.preferred_name || 'Staff Member',
+        roblox_username: u?.roblox_username || 'Unknown',
+        role: u?.role || 'STAFF'
+      };
+    });
+
+    const myAlloc = flightAllocations.find((a: any) => Number(a.user_id) === Number(user.id));
 
     return {
       ...flight,
-      my_status: myAllocation?.status || 'UNSURE',
-      allocations: flightAllocations
+      my_status: myAlloc ? myAlloc.status : 'UNALLOCATED',
+      allocations: enrichedAllocations
     };
   });
 
-  return NextResponse.json({ flights: flightsWithDetails });
+  return NextResponse.json({ flights: enrichedFlights });
 }
 
 export async function POST(request: Request) {
   const user = await getCurrentUser();
   if (!user || (user.role !== 'ADMIN' && user.role !== 'FOUNDER')) {
-    return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   try {
     const { flight_code, host_name, aircraft, datetime_utc } = await request.json();
 
     if (!flight_code || !host_name || !aircraft || !datetime_utc) {
-      return NextResponse.json({ error: 'Missing required flight fields' }, { status: 400 });
+      return NextResponse.json({ error: 'All flight fields are required' }, { status: 400 });
     }
 
-    const db = getDb();
-    const result = db.prepare(`
-      INSERT INTO flights (flight_code, host_name, aircraft, datetime_utc, status)
-      VALUES (?, ?, ?, ?, 'UPCOMING')
-    `).run(flight_code.trim(), host_name.trim(), aircraft.trim(), datetime_utc);
+    const flight = await createFlight({
+      flight_code,
+      host_name,
+      aircraft,
+      datetime_utc,
+      status: 'UPCOMING'
+    });
 
-    return NextResponse.json({ success: true, flightId: Number(result.lastInsertRowid) });
-  } catch (err) {
-    console.error('Error creating flight:', err);
-    return NextResponse.json({ error: 'Failed to create flight' }, { status: 500 });
+    return NextResponse.json({ flight });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Failed to create flight' }, { status: 500 });
   }
 }

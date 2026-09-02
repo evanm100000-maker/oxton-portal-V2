@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { getDb } from '@/lib/db';
+import { getReportsList, createReport, updateReport, getUsersList } from '@/lib/firebase-db';
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -8,27 +8,23 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const db = getDb();
-  let reports: any[];
+  const reports = await getReportsList();
+  const users = await getUsersList();
+
+  const enriched = reports.map((r: any) => {
+    const reporter = users.find((usr: any) => Number(usr.id) === Number(r.reporter_id));
+    return {
+      ...r,
+      reporter_name: reporter?.preferred_name || 'Staff Member',
+    };
+  });
 
   if (user.role === 'ADMIN' || user.role === 'FOUNDER') {
-    reports = db.prepare(`
-      SELECT r.*, u.preferred_name as reporter_name, u.roblox_username as reporter_roblox
-      FROM reports r
-      JOIN users u ON r.reporter_id = u.id
-      ORDER BY r.created_at DESC
-    `).all();
-  } else {
-    reports = db.prepare(`
-      SELECT r.*, u.preferred_name as reporter_name, u.roblox_username as reporter_roblox
-      FROM reports r
-      JOIN users u ON r.reporter_id = u.id
-      WHERE r.reporter_id = ?
-      ORDER BY r.created_at DESC
-    `).all(user.id);
+    return NextResponse.json({ reports: enriched });
   }
 
-  return NextResponse.json({ reports });
+  const myReports = enriched.filter((r: any) => Number(r.reporter_id) === Number(user.id));
+  return NextResponse.json({ reports: myReports });
 }
 
 export async function POST(request: Request) {
@@ -40,24 +36,22 @@ export async function POST(request: Request) {
   try {
     const { type, target_username, subject, description } = await request.json();
 
-    if (!type || !['USER', 'BUG', 'OTHER'].includes(type) || !subject || !description) {
-      return NextResponse.json({ error: 'Missing required report fields' }, { status: 400 });
+    if (!type || !subject || !description) {
+      return NextResponse.json({ error: 'Type, subject, and description are required' }, { status: 400 });
     }
 
-    if (type === 'USER' && (!target_username || target_username.trim() === '')) {
-      return NextResponse.json({ error: 'Target Roblox username is required for user reports' }, { status: 400 });
-    }
+    const report = await createReport({
+      reporter_id: user.id,
+      type,
+      target_username: target_username || null,
+      subject,
+      description,
+      status: 'PENDING'
+    });
 
-    const db = getDb();
-    const res = db.prepare(`
-      INSERT INTO reports (reporter_id, type, target_username, subject, description, status)
-      VALUES (?, ?, ?, ?, ?, 'PENDING')
-    `).run(user.id, type, target_username ? target_username.trim() : null, subject.trim(), description.trim());
-
-    return NextResponse.json({ success: true, reportId: Number(res.lastInsertRowid) });
-  } catch (err) {
-    console.error('Report submission error:', err);
-    return NextResponse.json({ error: 'Failed to submit report' }, { status: 500 });
+    return NextResponse.json({ report });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Failed to submit report' }, { status: 500 });
   }
 }
 
@@ -69,33 +63,13 @@ export async function PUT(request: Request) {
 
   try {
     const { id, status, admin_notes } = await request.json();
-
-    if (!id || !['PENDING', 'UNDER_REVIEW', 'RESOLVED', 'DISMISSED'].includes(status)) {
-      return NextResponse.json({ error: 'Invalid parameters' }, { status: 400 });
+    if (!id || !status) {
+      return NextResponse.json({ error: 'ID and status required' }, { status: 400 });
     }
 
-    const db = getDb();
-    db.prepare(`
-      UPDATE reports
-      SET status = ?, admin_notes = ?
-      WHERE id = ?
-    `).run(status, admin_notes || '', id);
-
-    const report = db.prepare(`SELECT reporter_id, subject FROM reports WHERE id = ?`).get(id) as any;
-    if (report) {
-      db.prepare(`
-        INSERT INTO notifications (user_id, title, message, type)
-        VALUES (?, ?, ?, 'INFO')
-      `).run(
-        report.reporter_id,
-        `Report Status Updated`,
-        `Your report "${report.subject}" has been marked as ${status.replace('_', ' ')}.`
-      );
-    }
-
+    await updateReport(Number(id), { status, admin_notes: admin_notes || null });
     return NextResponse.json({ success: true });
-  } catch (err) {
-    console.error('Report update error:', err);
-    return NextResponse.json({ error: 'Failed to update report' }, { status: 500 });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Failed to update report' }, { status: 500 });
   }
 }

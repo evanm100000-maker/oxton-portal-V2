@@ -8,7 +8,7 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const suspension = getUserSuspension(user.id);
+  const suspension = await getUserSuspension(user.id);
   if (suspension && user.role !== 'FOUNDER') {
     return NextResponse.json({
       error: 'Account Suspended',
@@ -18,8 +18,8 @@ export async function GET() {
     }, { status: 403 });
   }
 
-  const quota = getUserQuotaInfo(user.id);
-  const activeLoa = getUserActiveLOA(user.id);
+  const quota = await getUserQuotaInfo(user.id);
+  const activeLoa = await getUserActiveLOA(user.id);
 
   return NextResponse.json({
     user: {

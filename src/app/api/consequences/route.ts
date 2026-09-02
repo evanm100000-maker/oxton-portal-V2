@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { getDb } from '@/lib/db';
+import { getConsequencesList, createConsequence, getUsersList, createNotification } from '@/lib/firebase-db';
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -8,31 +8,23 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const db = getDb();
-  let consequences: any[];
+  const consequences = await getConsequencesList();
+  const users = await getUsersList();
+
+  const enriched = consequences.map((c: any) => {
+    const issuer = users.find((usr: any) => Number(usr.id) === Number(c.issuer_id));
+    return {
+      ...c,
+      issuer_name: issuer?.preferred_name || 'Admin',
+    };
+  });
 
   if (user.role === 'ADMIN' || user.role === 'FOUNDER') {
-    consequences = db.prepare(`
-      SELECT c.*, u.preferred_name as target_name, u.roblox_username as target_roblox,
-             issuer.preferred_name as issuer_name
-      FROM consequences c
-      JOIN users u ON c.user_id = u.id
-      JOIN users issuer ON c.issuer_id = issuer.id
-      ORDER BY c.created_at DESC
-    `).all();
-  } else {
-    consequences = db.prepare(`
-      SELECT c.*, u.preferred_name as target_name, u.roblox_username as target_roblox,
-             issuer.preferred_name as issuer_name
-      FROM consequences c
-      JOIN users u ON c.user_id = u.id
-      JOIN users issuer ON c.issuer_id = issuer.id
-      WHERE c.user_id = ?
-      ORDER BY c.created_at DESC
-    `).all(user.id);
+    return NextResponse.json({ consequences: enriched });
   }
 
-  return NextResponse.json({ consequences });
+  const myConsequences = enriched.filter((c: any) => Number(c.user_id) === Number(user.id));
+  return NextResponse.json({ consequences: myConsequences });
 }
 
 export async function POST(request: Request) {
@@ -42,45 +34,30 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { user_id, type, reason, notes } = await request.json();
+    const { user_id, type, reason, notes, expires_at } = await request.json();
 
-    if (!user_id || !type || !['INFORMAL_SANCTION', 'INFRACTION', 'SUSPENSION'].includes(type) || !reason) {
-      return NextResponse.json({ error: 'Missing required consequence parameters' }, { status: 400 });
+    if (!user_id || !type || !reason) {
+      return NextResponse.json({ error: 'Target user, type, and reason are required' }, { status: 400 });
     }
 
-    const db = getDb();
+    const cons = await createConsequence({
+      user_id: Number(user_id),
+      issuer_id: user.id,
+      type,
+      reason,
+      notes: notes || null,
+      expires_at: expires_at || null
+    });
 
-    // Check target user
-    const targetUser = db.prepare(`SELECT * FROM users WHERE id = ?`).get(user_id) as any;
-    if (!targetUser) {
-      return NextResponse.json({ error: 'Target user not found' }, { status: 404 });
-    }
-
-    // Insert consequence
-    const res = db.prepare(`
-      INSERT INTO consequences (user_id, issuer_id, type, reason, notes)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(user_id, user.id, type, reason.trim(), notes ? notes.trim() : null);
-
-    // If suspension, update user status to SUSPENDED
-    if (type === 'SUSPENSION') {
-      db.prepare(`UPDATE users SET status = 'SUSPENDED' WHERE id = ?`).run(user_id);
-    }
-
-    // Send Notification
-    const readableType = type.replace('_', ' ');
-    db.prepare(`
-      INSERT INTO notifications (user_id, title, message, type)
-      VALUES (?, ?, ?, 'CONSEQUENCE')
-    `).run(
-      user_id,
-      `New Disciplinary Action: ${readableType}`,
-      `You received a ${readableType}. Reason: ${reason}`
+    await createNotification(
+      Number(user_id),
+      `Disciplinary Action Issued: ${type.replace('_', ' ')}`,
+      `You have been issued a ${type.replace('_', ' ')}. Reason: ${reason}`,
+      'CONSEQUENCE'
     );
 
-    return NextResponse.json({ success: true, consequenceId: Number(res.lastInsertRowid) });
-  } catch (err) {
-    console.error('Consequence issue error:', err);
-    return NextResponse.json({ error: 'Failed to issue consequence' }, { status: 500 });
+    return NextResponse.json({ consequence: cons });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Failed to issue consequence' }, { status: 500 });
   }
 }
