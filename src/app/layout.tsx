@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Oxton Staff Portal eCrew',
+  title: 'Luma Staff Portal eCrew',
   description: 'Official Roblox Aviation Staff Management Portal',
 };
 

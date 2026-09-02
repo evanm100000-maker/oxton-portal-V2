@@ -100,7 +100,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div className="min-h-screen bg-[#f0f3ff] flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="w-12 h-12 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-purple-900 font-bold text-sm">Loading Oxton Staff Portal...</p>
+          <p className="text-purple-900 font-bold text-sm">Loading Luma Staff Portal...</p>
         </div>
       </div>
     );
@@ -122,7 +122,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-screen flex bg-[#f0f3ff] text-slate-800">
-      {/* Sidebar - Blue to Purple Gradient */}
+      {/* Sidebar */}
       <aside className="w-64 bg-gradient-to-b from-blue-700 via-indigo-800 to-purple-900 text-white flex flex-col justify-between shadow-2xl fixed inset-y-0 left-0 z-30">
         <div>
           <div className="p-6 flex items-center gap-3 border-b border-white/15">
@@ -130,7 +130,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <Plane className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="font-black tracking-tight text-lg leading-tight text-white">OXTON</h2>
+              <h2 className="font-black tracking-tight text-lg leading-tight text-white">LUMA</h2>
               <p className="text-xs text-purple-200 font-medium">Airways Roblox eCrew</p>
             </div>
           </div>
@@ -174,7 +174,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <header className="h-16 bg-white/90 backdrop-blur-md border-b border-purple-100/80 px-8 flex items-center justify-between sticky top-0 z-20 shadow-sm">
           <div className="flex items-center gap-3 text-slate-800 font-bold text-sm">
             <LayoutDashboard className="w-4 h-4 text-purple-600" />
-            <span>Oxton Staff Portal</span>
+            <span>Luma Staff Portal</span>
           </div>
 
           <div className="flex items-center gap-6">
@@ -223,7 +223,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               )}
             </div>
 
-            {/* Profile Dropdown - No Points Display */}
+            {/* Profile Dropdown */}
             <div className="flex items-center gap-3 pl-3 border-l border-purple-100">
               <div className="w-9 h-9 bg-gradient-to-tr from-blue-600 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
                 {user?.preferred_name?.charAt(0) || 'U'}
@@ -254,7 +254,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </main>
 
         <footer className="py-4 px-8 border-t border-purple-100 text-center text-xs text-slate-400 bg-white/60">
-          OXTON AIRWAYS is a non-affiliated recreation. Created for staff & eCrew operations.
+          LUMA AIRWAYS is a non-affiliated recreation. Created for staff & eCrew operations.
         </footer>
       </div>
     </div>

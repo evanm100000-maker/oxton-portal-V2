@@ -89,7 +89,7 @@ export default function LoginPage() {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-white/10 backdrop-blur-md rounded-2xl mb-3 shadow-inner border border-white/20">
             <Plane className="w-9 h-9 text-white" />
           </div>
-          <h1 className="text-2xl font-black tracking-tight">OXTON AIRWAYS</h1>
+          <h1 className="text-2xl font-black tracking-tight">LUMA AIRWAYS</h1>
           <p className="text-purple-100 text-sm font-medium mt-1">Staff & eCrew Portal V2.0</p>
         </div>
 
@@ -144,7 +144,7 @@ export default function LoginPage() {
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="staff@oxtonairways.com"
+                    placeholder="staff@lumaairways.com"
                     className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-600 focus:bg-white text-slate-800 text-sm"
                   />
                 </div>
@@ -239,7 +239,7 @@ export default function LoginPage() {
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="staff@oxtonairways.com"
+                    placeholder="staff@lumaairways.com"
                     className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-purple-600"
                   />
                 </div>
@@ -275,7 +275,7 @@ export default function LoginPage() {
 
         {/* Footer */}
         <div className="p-4 bg-slate-50 border-t border-purple-100 text-center text-xs text-slate-400">
-          Oxton Airways Roblox eCrew Portal • High Performance Staff System
+          Luma Airways Roblox eCrew Portal • High Performance Staff System
         </div>
       </div>
     </div>

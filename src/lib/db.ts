@@ -1,13 +1,20 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import bcrypt from 'bcryptjs';
 
-const dbPath = path.join(process.cwd(), 'data.db');
-const dbDir = path.dirname(dbPath);
+// On Vercel serverless functions, process.cwd() is read-only. Use os.tmpdir() (/tmp)
+const isVercel = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
+const dbDir = isVercel ? os.tmpdir() : process.cwd();
+const dbPath = path.join(dbDir, 'data.db');
 
 if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+  try {
+    fs.mkdirSync(dbDir, { recursive: true });
+  } catch (e) {
+    // Already exists
+  }
 }
 
 let dbInstance: DatabaseSync | null = null;
@@ -50,7 +57,7 @@ function initSchema(db: DatabaseSync) {
       flight_id INTEGER NOT NULL,
       user_id INTEGER NOT NULL,
       status TEXT NOT NULL DEFAULT 'UNSURE',
-      attendance_status TEXT DEFAULT 'NONE', -- 'PRESENT', 'LATE', 'ABSENT', 'NONE'
+      attendance_status TEXT DEFAULT 'NONE',
       attended INTEGER NOT NULL DEFAULT 0,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(flight_id, user_id)
@@ -163,8 +170,8 @@ function initSchema(db: DatabaseSync) {
       VALUES (?, ?, ?)
     `).run(
       1,
-      'Return to Normal Schedule',
-      'Starting next week, we will be returning to our normal weekday schedule for back-to-school. The timings are as follows:\n\n(MON-THUR):\n- 16:55\n- 18:55\n\n(FRI):\n- 16:55\n- 18:55\n- 20:55\n\nSUND & SAT remain unchanged. Best of luck with schools, colleges, and work!'
+      'Welcome to Luma Airways Staff Portal',
+      'Welcome all staff to the official Luma Airways eCrew portal! Please ensure you allocate your flight availability weekly and check the announcements channel.'
     );
   }
 
@@ -180,7 +187,7 @@ function initSchema(db: DatabaseSync) {
       INSERT INTO flights (flight_code, host_name, aircraft, datetime_utc, status)
       VALUES (?, ?, ?, ?, ?)
     `).run(
-      'OX-104',
+      'LM-104',
       'Capt. Evan',
       'Boeing 787-9 Dreamliner',
       tomorrow.toISOString(),
