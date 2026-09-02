@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { getAnnouncementsList, createAnnouncement, getUsersList } from '@/lib/firebase-db';
+import { getAnnouncementsList, createAnnouncement, deleteAnnouncement, getUsersList } from '@/lib/firebase-db';
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -47,5 +47,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ announcement: ann });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Failed to create announcement' }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  const user = await getCurrentUser();
+  if (!user || (user.role !== 'ADMIN' && user.role !== 'FOUNDER')) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  try {
+    const { id } = await request.json();
+    if (!id) {
+      return NextResponse.json({ error: 'Announcement ID required' }, { status: 400 });
+    }
+
+    await deleteAnnouncement(Number(id));
+    return NextResponse.json({ success: true });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Failed to delete announcement' }, { status: 500 });
   }
 }

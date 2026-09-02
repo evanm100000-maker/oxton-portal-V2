@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { getFlightsList, createFlight, getAllocationsList, getUsersList } from '@/lib/firebase-db';
+import { getFlightsList, createFlight, deleteFlight, getAllocationsList, getUsersList } from '@/lib/firebase-db';
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -61,5 +61,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ flight });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Failed to create flight' }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  const user = await getCurrentUser();
+  if (!user || (user.role !== 'ADMIN' && user.role !== 'FOUNDER')) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  try {
+    const { id } = await request.json();
+    if (!id) {
+      return NextResponse.json({ error: 'Flight ID required' }, { status: 400 });
+    }
+
+    await deleteFlight(Number(id));
+    return NextResponse.json({ success: true });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Failed to delete flight' }, { status: 500 });
   }
 }

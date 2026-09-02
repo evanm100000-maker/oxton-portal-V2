@@ -24,7 +24,8 @@ import {
   ClipboardCheck,
   Wrench,
   AlertOctagon,
-  Power
+  Power,
+  Trash2
 } from 'lucide-react';
 
 export default function AdminPanelPage() {
@@ -67,9 +68,6 @@ export default function AdminPanelPage() {
 
   const [annTitle, setAnnTitle] = useState('');
   const [annContent, setAnnContent] = useState('');
-
-  const [activeTicket, setActiveTicket] = useState<any>(null);
-  const [adminTicketReply, setAdminTicketReply] = useState('');
 
   const [feedback, setFeedback] = useState<string | null>(null);
 
@@ -123,13 +121,11 @@ export default function AdminPanelPage() {
 
   useEffect(() => {
     fetchAllAdminData();
-    // Live Auto Refresh Polling every 3 seconds for real-time admin sync
     const interval = setInterval(fetchAllAdminData, 3000);
     return () => clearInterval(interval);
   }, []);
 
   const handleApproveSignup = async (userId: number, status: 'ACTIVE' | 'DECLINED') => {
-    // Optimistic UI Removal
     setUsers((prev) => prev.filter((u) => u.id !== userId));
 
     const res = await fetch('/api/admin/users', {
@@ -176,6 +172,36 @@ export default function AdminPanelPage() {
       setHostName('');
       setAircraft('');
       setFlightDateTime('');
+      fetchAllAdminData();
+    }
+  };
+
+  const handleDeleteFlight = async (flightId: number) => {
+    if (!confirm('Are you sure you want to permanently delete this flight?')) return;
+    setFlights((prev) => prev.filter((f) => f.id !== flightId));
+
+    const res = await fetch('/api/flights', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: flightId }),
+    });
+    if (res.ok) {
+      setFeedback('Flight permanently deleted.');
+      fetchAllAdminData();
+    }
+  };
+
+  const handleDeleteAnnouncement = async (annId: number) => {
+    if (!confirm('Are you sure you want to delete this announcement?')) return;
+    setAnnouncements((prev) => prev.filter((a) => a.id !== annId));
+
+    const res = await fetch('/api/announcements', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: annId }),
+    });
+    if (res.ok) {
+      setFeedback('Announcement deleted.');
       fetchAllAdminData();
     }
   };
@@ -289,7 +315,7 @@ export default function AdminPanelPage() {
 
   const handleToggleMaintenance = async () => {
     const nextState = !maintEnabled;
-    setMaintEnabled(nextState); // Immediate state update
+    setMaintEnabled(nextState);
 
     const res = await fetch('/api/admin/settings', {
       method: 'POST',
@@ -417,7 +443,7 @@ export default function AdminPanelPage() {
           }`}
         >
           <CalendarDays className="w-4 h-4" />
-          Flight Registers
+          Flight Schedules ({flights.length})
         </button>
 
         <button
@@ -458,6 +484,16 @@ export default function AdminPanelPage() {
         >
           <Wrench className="w-4 h-4" />
           Maintenance & Warning Banners
+        </button>
+
+        <button
+          onClick={() => setActiveTab('ANNOUNCEMENTS')}
+          className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 ${
+            activeTab === 'ANNOUNCEMENTS' ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-purple-50'
+          }`}
+        >
+          <Megaphone className="w-4 h-4" />
+          Announcements ({announcements.length})
         </button>
 
         <button
@@ -636,27 +672,40 @@ export default function AdminPanelPage() {
           </div>
 
           <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
-            <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-3">Scheduled Flights & Registers</h3>
-            <div className="space-y-3">
-              {flights.map((f) => (
-                <div key={f.id} className="p-4 bg-purple-50/40 rounded-2xl border border-purple-100 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-extrabold px-2.5 py-0.5 bg-purple-100 text-purple-800 rounded-full border border-purple-200">{f.flight_code}</span>
-                      <span className="font-bold text-slate-800">{f.aircraft}</span>
-                      <span className="text-slate-500">({f.status})</span>
+            <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-3">Scheduled Flights ({flights.length})</h3>
+            {flights.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center py-6">No scheduled flights found.</p>
+            ) : (
+              <div className="space-y-3">
+                {flights.map((f) => (
+                  <div key={f.id} className="p-4 bg-purple-50/40 rounded-2xl border border-purple-100 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-extrabold px-2.5 py-0.5 bg-purple-100 text-purple-800 rounded-full border border-purple-200">{f.flight_code}</span>
+                        <span className="font-bold text-slate-800">{f.aircraft}</span>
+                        <span className="text-slate-500">({f.status})</span>
+                      </div>
+                      <p className="text-slate-600 mt-1">Host: {f.host_name} | Date: {new Date(f.datetime_utc).toLocaleString()}</p>
                     </div>
-                    <p className="text-slate-600 mt-1">Host: {f.host_name} | Date: {new Date(f.datetime_utc).toLocaleString()}</p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => openRegisterModal(f)}
+                        className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold rounded-xl shadow-md flex items-center gap-1.5"
+                      >
+                        <ClipboardCheck className="w-4 h-4" /> Attendance Register
+                      </button>
+                      <button
+                        onClick={() => handleDeleteFlight(f.id)}
+                        className="p-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md"
+                        title="Delete Flight Permanently"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    onClick={() => openRegisterModal(f)}
-                    className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold rounded-xl shadow-md flex items-center gap-1.5"
-                  >
-                    <ClipboardCheck className="w-4 h-4" /> Attendance Register
-                  </button>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -934,7 +983,6 @@ export default function AdminPanelPage() {
       {/* TAB 7: MAINTENANCE MODE & FORTNITE WARNING BANNERS */}
       {activeTab === 'MAINTENANCE_ALERTS' && (
         <div className="space-y-6">
-          {/* Maintenance Lockout Manager */}
           <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
@@ -967,7 +1015,6 @@ export default function AdminPanelPage() {
             </div>
           </div>
 
-          {/* Fortnite Style Warning Banner Publisher */}
           <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
             <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
               <div>
@@ -1040,7 +1087,70 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 8: REPORTS */}
+      {/* TAB 8: ANNOUNCEMENTS */}
+      {activeTab === 'ANNOUNCEMENTS' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
+            <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-3">Post Portal Announcement</h3>
+            <form onSubmit={handleCreateAnnouncement} className="space-y-4 text-xs font-medium">
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Announcement Title</label>
+                <input
+                  type="text"
+                  required
+                  value={annTitle}
+                  onChange={(e) => setAnnTitle(e.target.value)}
+                  placeholder="Title..."
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Content</label>
+                <textarea
+                  required
+                  rows={4}
+                  value={annContent}
+                  onChange={(e) => setAnnContent(e.target.value)}
+                  placeholder="Write your announcement..."
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-800"
+                ></textarea>
+              </div>
+              <div className="flex justify-end">
+                <button type="submit" className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold rounded-xl shadow-md">
+                  Publish Announcement
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
+            <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-3">Existing Announcements ({announcements.length})</h3>
+            {announcements.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center py-6">No announcements posted yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {announcements.map((a) => (
+                  <div key={a.id} className="p-4 bg-purple-50/40 rounded-2xl border border-purple-100 flex items-center justify-between text-xs">
+                    <div>
+                      <h4 className="font-bold text-slate-800 text-sm">{a.title}</h4>
+                      <p className="text-slate-600 mt-1 truncate max-w-xl">{a.content}</p>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteAnnouncement(a.id)}
+                      className="p-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md"
+                      title="Delete Announcement"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 9: REPORTS */}
       {activeTab === 'REPORTS' && (
         <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
           <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-3">User & Bug Reports Desk</h3>

@@ -19,20 +19,15 @@ async function fbFetch(endpoint: string, options?: RequestInit) {
   return res.json();
 }
 
-// Ensure initial seed data exists in Firebase
-let isSeeded = false;
-
-export async function ensureFirebaseSeeded() {
-  if (isSeeded) return;
+// Seed ONLY the Founder Account if missing. NEVER re-seed deleted flights or announcements.
+export async function ensureFounderAccount() {
   try {
     const users = await fbFetch('users');
     if (!users || Object.keys(users).length === 0) {
-      // Seed Founder account
       const salt = bcrypt.genSaltSync(10);
       const passwordHash = bcrypt.hashSync('Michelle11', salt);
-      const founderId = '1';
 
-      await fbFetch(`users/${founderId}`, {
+      await fbFetch('users/1', {
         method: 'PUT',
         body: JSON.stringify({
           id: 1,
@@ -47,52 +42,14 @@ export async function ensureFirebaseSeeded() {
         })
       });
     }
-
-    const ann = await fbFetch('announcements');
-    if (!ann || Object.keys(ann).length === 0) {
-      await fbFetch('announcements/1', {
-        method: 'PUT',
-        body: JSON.stringify({
-          id: 1,
-          author_id: 1,
-          author_name: 'Evan (Founder)',
-          author_role: 'FOUNDER',
-          title: 'Welcome to Luma Airways Staff Portal',
-          content: 'Welcome all staff to the official Luma Airways eCrew portal! Please ensure you allocate your flight availability weekly.',
-          created_at: new Date().toISOString()
-        })
-      });
-    }
-
-    const flights = await fbFetch('flights');
-    if (!flights || Object.keys(flights).length === 0) {
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(18, 0, 0, 0);
-
-      await fbFetch('flights/1', {
-        method: 'PUT',
-        body: JSON.stringify({
-          id: 1,
-          flight_code: 'LM-104',
-          host_name: 'Capt. Evan',
-          aircraft: 'Boeing 787-9 Dreamliner',
-          datetime_utc: tomorrow.toISOString(),
-          status: 'UPCOMING',
-          created_at: new Date().toISOString()
-        })
-      });
-    }
-
-    isSeeded = true;
   } catch (err) {
-    console.error('Firebase Seeding Error:', err);
+    console.error('Firebase Founder Seeding Error:', err);
   }
 }
 
 // --- USERS ---
 export async function getUsersList(): Promise<any[]> {
-  await ensureFirebaseSeeded();
+  await ensureFounderAccount();
   const data = await fbFetch('users');
   if (!data) return [];
   return Object.values(data).filter(Boolean);
@@ -135,7 +92,6 @@ export async function updateUser(id: number, updates: any): Promise<void> {
 
 // --- FLIGHTS ---
 export async function getFlightsList(): Promise<any[]> {
-  await ensureFirebaseSeeded();
   const data = await fbFetch('flights');
   if (!data) return [];
   return Object.values(data).filter(Boolean);
@@ -163,6 +119,12 @@ export async function updateFlight(id: number, updates: any): Promise<void> {
   await fbFetch(`flights/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(updates)
+  });
+}
+
+export async function deleteFlight(id: number): Promise<void> {
+  await fbFetch(`flights/${id}`, {
+    method: 'DELETE'
   });
 }
 
@@ -343,7 +305,6 @@ export async function createConsequence(consData: any): Promise<any> {
 
 // --- ANNOUNCEMENTS ---
 export async function getAnnouncementsList(): Promise<any[]> {
-  await ensureFirebaseSeeded();
   const data = await fbFetch('announcements');
   if (!data) return [];
   return Object.values(data).filter(Boolean);
@@ -365,6 +326,12 @@ export async function createAnnouncement(annData: any): Promise<any> {
   });
 
   return newAnn;
+}
+
+export async function deleteAnnouncement(id: number): Promise<void> {
+  await fbFetch(`announcements/${id}`, {
+    method: 'DELETE'
+  });
 }
 
 // --- NOTIFICATIONS ---
@@ -434,7 +401,6 @@ export async function createSystemAlert(title: string, message: string, severity
   const list = data ? Object.values(data).filter(Boolean) as any[] : [];
   const nextId = list.length > 0 ? Math.max(...list.map((a) => Number(a.id) || 0)) + 1 : 1;
 
-  // Deactivate old alerts
   for (const a of list) {
     if (a.is_active) {
       await fbFetch(`alerts/${a.id}`, {
