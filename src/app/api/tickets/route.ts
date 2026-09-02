@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { getTicketsList, createTicket, addTicketMessage, updateTicket, getUsersList } from '@/lib/firebase-db';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) {
@@ -21,11 +24,11 @@ export async function GET() {
   });
 
   if (user.role === 'ADMIN' || user.role === 'FOUNDER') {
-    return NextResponse.json({ tickets: enriched });
+    return NextResponse.json({ tickets: enriched }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   }
 
   const myTickets = enriched.filter((t: any) => Number(t.user_id) === Number(user.id));
-  return NextResponse.json({ tickets: myTickets });
+  return NextResponse.json({ tickets: myTickets }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
 }
 
 export async function POST(request: Request) {
@@ -52,7 +55,7 @@ export async function POST(request: Request) {
         user.role
       );
 
-      return NextResponse.json({ ticket });
+      return NextResponse.json({ ticket }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
     }
 
     if (action === 'reply') {
@@ -63,7 +66,7 @@ export async function POST(request: Request) {
       }
 
       await addTicketMessage(Number(ticket_id), user.id, user.preferred_name, user.role, message);
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ success: true }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
@@ -85,7 +88,7 @@ export async function PUT(request: Request) {
     }
 
     await updateTicket(Number(id), { status });
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Failed to update ticket status' }, { status: 500 });
   }

@@ -38,8 +38,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [maintenance, setMaintenance] = useState<{ active: boolean; message: string }>({ active: false, message: '' });
   const [systemAlert, setSystemAlert] = useState<any>(null);
 
-  useEffect(() => {
-    fetch('/api/auth/me')
+  const checkUserAndAlerts = () => {
+    fetch(`/api/auth/me?t=${Date.now()}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
         if (data.suspended) {
@@ -56,8 +56,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         router.push('/login');
       });
 
-    // Check system alerts & maintenance mode
-    fetch('/api/system-alerts')
+    fetch(`/api/system-alerts?t=${Date.now()}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
         if (data) {
@@ -65,10 +64,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           setSystemAlert(data.alert);
         }
       });
+  };
+
+  useEffect(() => {
+    checkUserAndAlerts();
+    const interval = setInterval(checkUserAndAlerts, 3000);
+    return () => clearInterval(interval);
   }, []);
 
   const fetchNotifications = () => {
-    fetch('/api/notifications')
+    fetch(`/api/notifications?t=${Date.now()}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
         if (data.notifications) {
@@ -82,7 +87,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     if (user && !suspension) {
       fetchNotifications();
-      const interval = setInterval(fetchNotifications, 15000);
+      const interval = setInterval(fetchNotifications, 5000);
       return () => clearInterval(interval);
     }
   }, [user, suspension]);
@@ -331,7 +336,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </header>
 
-        {/* FORTNITE-STYLE SYSTEM WARNING BANNER (Matching uploaded screenshot) */}
+        {/* FORTNITE-STYLE SYSTEM WARNING BANNER */}
         {systemAlert && systemAlert.is_active === 1 && (
           <div className="mx-8 mt-6">
             <div className={`rounded-xl shadow-xl overflow-hidden flex border text-white ${
@@ -341,7 +346,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 ? 'bg-emerald-950 border-emerald-600'
                 : 'bg-[#1b2b4e] border-yellow-400/80'
             }`}>
-              {/* Left Large Icon Block */}
               <div className={`w-20 md:w-24 shrink-0 flex items-center justify-center border-r p-3 ${
                 systemAlert.severity === 'SEVERE'
                   ? 'bg-rose-600 text-white border-rose-500'
@@ -358,20 +362,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 )}
               </div>
 
-              {/* Banner Right Text Container */}
               <div className="p-4 flex-1 flex flex-col justify-center space-y-1">
-                {/* Yellow Header Pill Bar */}
-                <div className="inline-block self-start px-2.5 py-0.5 font-black text-xs uppercase tracking-wider rounded-sm shadow-sm ${
+                <div className={`inline-block self-start px-2.5 py-0.5 font-black text-xs uppercase tracking-wider rounded-sm shadow-sm ${
                   systemAlert.severity === 'SEVERE'
                     ? 'bg-rose-500 text-white'
                     : systemAlert.severity === 'RESOLVED'
                     ? 'bg-emerald-500 text-white'
                     : 'bg-yellow-300 text-slate-950'
-                }">
+                }`}>
                   {systemAlert.title}
                 </div>
 
-                {/* Banner Message Body */}
                 <p className="text-xs font-semibold leading-snug tracking-wide opacity-95">
                   {systemAlert.message}
                 </p>

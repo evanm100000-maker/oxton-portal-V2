@@ -1,27 +1,18 @@
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { getSystemSettings, getActiveSystemAlert } from '@/lib/firebase-db';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export async function GET() {
-  const db = getDb();
-
-  // Maintenance setting
-  const maintRow = db.prepare(`SELECT value FROM system_settings WHERE key = 'maintenance_mode'`).get() as any;
-  const msgRow = db.prepare(`SELECT value FROM system_settings WHERE key = 'maintenance_message'`).get() as any;
-
-  const maintenanceMode = maintRow?.value === '1';
-  const maintenanceMessage = msgRow?.value || 'Website is currently under maintenance.';
-
-  // Active Alert Banner
-  const alertRow = db.prepare(`
-    SELECT * FROM system_alerts
-    WHERE is_active = 1
-    ORDER BY id DESC
-    LIMIT 1
-  `).get() as any;
+  const settings = await getSystemSettings();
+  const alert = await getActiveSystemAlert();
 
   return NextResponse.json({
-    maintenance_mode: maintenanceMode,
-    maintenance_message: maintenanceMessage,
-    alert: alertRow || null,
+    maintenance_mode: settings.maintenance_mode === '1',
+    maintenance_message: settings.maintenance_message || 'Website is currently under maintenance.',
+    alert: alert || null,
+  }, {
+    headers: { 'Cache-Control': 'no-store, max-age=0' }
   });
 }

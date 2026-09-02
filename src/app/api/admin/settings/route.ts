@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { getDb } from '@/lib/db';
+import { updateSystemSetting, createSystemAlert, resolveSystemAlert } from '@/lib/firebase-db';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export async function POST(request: Request) {
   const user = await getCurrentUser();
@@ -9,17 +12,18 @@ export async function POST(request: Request) {
   }
 
   try {
-    const db = getDb();
     const body = await request.json();
     const { action } = body;
 
     if (action === 'toggle_maintenance') {
       const { enabled, message } = body;
-      db.prepare(`INSERT OR REPLACE INTO system_settings (key, value) VALUES ('maintenance_mode', ?)`).run(enabled ? '1' : '0');
+      await updateSystemSetting('maintenance_mode', enabled ? '1' : '0');
       if (message) {
-        db.prepare(`INSERT OR REPLACE INTO system_settings (key, value) VALUES ('maintenance_message', ?)`).run(message);
+        await updateSystemSetting('maintenance_message', message);
       }
-      return NextResponse.json({ success: true, enabled, message });
+      return NextResponse.json({ success: true, enabled, message }, {
+        headers: { 'Cache-Control': 'no-store, max-age=0' }
+      });
     }
 
     if (action === 'create_alert') {
@@ -28,30 +32,24 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Title and message required' }, { status: 400 });
       }
 
-      // Deactivate older active alerts
-      db.prepare(`UPDATE system_alerts SET is_active = 0`).run();
+      await createSystemAlert(title, message, severity || 'WARNING');
 
-      db.prepare(`
-        INSERT INTO system_alerts (title, message, severity, is_active)
-        VALUES (?, ?, ?, 1)
-      `).run(title, message, severity || 'WARNING');
-
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ success: true }, {
+        headers: { 'Cache-Control': 'no-store, max-age=0' }
+      });
     }
 
     if (action === 'resolve_alert') {
       const { alert_id } = body;
-      if (alert_id) {
-        db.prepare(`UPDATE system_alerts SET severity = 'RESOLVED' WHERE id = ?`).run(alert_id);
-      } else {
-        db.prepare(`UPDATE system_alerts SET is_active = 0`).run();
-      }
-      return NextResponse.json({ success: true });
+      await resolveSystemAlert(alert_id);
+      return NextResponse.json({ success: true }, {
+        headers: { 'Cache-Control': 'no-store, max-age=0' }
+      });
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
-  } catch (err) {
+  } catch (err: any) {
     console.error('Settings API error:', err);
-    return NextResponse.json({ error: 'Failed to update system settings' }, { status: 500 });
+    return NextResponse.json({ error: err.message || 'Failed to update system settings' }, { status: 500 });
   }
 }

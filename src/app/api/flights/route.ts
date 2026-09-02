@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { getFlightsList, createFlight, deleteFlight, getAllocationsList, getUsersList } from '@/lib/firebase-db';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) {
@@ -34,7 +37,9 @@ export async function GET() {
     };
   });
 
-  return NextResponse.json({ flights: enrichedFlights });
+  return NextResponse.json({ flights: enrichedFlights }, {
+    headers: { 'Cache-Control': 'no-store, max-age=0' }
+  });
 }
 
 export async function POST(request: Request) {
@@ -58,7 +63,9 @@ export async function POST(request: Request) {
       status: 'UPCOMING'
     });
 
-    return NextResponse.json({ flight });
+    return NextResponse.json({ flight }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' }
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Failed to create flight' }, { status: 500 });
   }
@@ -77,7 +84,9 @@ export async function DELETE(request: Request) {
     }
 
     await deleteFlight(Number(id));
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' }
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Failed to delete flight' }, { status: 500 });
   }

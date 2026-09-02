@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { getUserQuotaInfo, getUserActiveLOA, getUserSuspension } from '@/lib/server-utils';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) {
@@ -15,7 +18,10 @@ export async function GET() {
       suspended: true,
       suspension,
       user
-    }, { status: 403 });
+    }, {
+      status: 403,
+      headers: { 'Cache-Control': 'no-store, max-age=0' }
+    });
   }
 
   const quota = await getUserQuotaInfo(user.id);
@@ -27,5 +33,7 @@ export async function GET() {
       quota,
       active_loa: activeLoa
     }
+  }, {
+    headers: { 'Cache-Control': 'no-store, max-age=0' }
   });
 }

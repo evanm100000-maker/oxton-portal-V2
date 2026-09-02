@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { getAnnouncementsList, createAnnouncement, deleteAnnouncement, getUsersList } from '@/lib/firebase-db';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) {
@@ -20,7 +23,7 @@ export async function GET() {
     };
   });
 
-  return NextResponse.json({ announcements: enriched });
+  return NextResponse.json({ announcements: enriched }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
 }
 
 export async function POST(request: Request) {
@@ -44,7 +47,7 @@ export async function POST(request: Request) {
       content,
     });
 
-    return NextResponse.json({ announcement: ann });
+    return NextResponse.json({ announcement: ann }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Failed to create announcement' }, { status: 500 });
   }
@@ -63,7 +66,7 @@ export async function DELETE(request: Request) {
     }
 
     await deleteAnnouncement(Number(id));
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Failed to delete announcement' }, { status: 500 });
   }

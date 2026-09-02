@@ -3,6 +3,9 @@ import { getCurrentUser } from '@/lib/auth';
 import { getUsersList, updateUser, createNotification } from '@/lib/firebase-db';
 import { getUserQuotaInfo } from '@/lib/server-utils';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET() {
   const user = await getCurrentUser();
   if (!user || (user.role !== 'ADMIN' && user.role !== 'FOUNDER')) {
@@ -18,7 +21,9 @@ export async function GET() {
     }))
   );
 
-  return NextResponse.json({ users: usersWithQuota });
+  return NextResponse.json({ users: usersWithQuota }, {
+    headers: { 'Cache-Control': 'no-store, max-age=0' }
+  });
 }
 
 export async function PUT(request: Request) {
@@ -48,7 +53,9 @@ export async function PUT(request: Request) {
         status === 'ACTIVE' ? 'SUCCESS' : 'WARNING'
       );
 
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ success: true }, {
+        headers: { 'Cache-Control': 'no-store, max-age=0' }
+      });
     }
 
     if (action === 'update_role') {
@@ -78,7 +85,9 @@ export async function PUT(request: Request) {
         `Your portal role has been updated to ${role} by the Founder.`
       );
 
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ success: true }, {
+        headers: { 'Cache-Control': 'no-store, max-age=0' }
+      });
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
