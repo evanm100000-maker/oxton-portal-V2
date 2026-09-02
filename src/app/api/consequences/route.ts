@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { getConsequencesList, createConsequence, getUsersList, createNotification } from '@/lib/firebase-db';
+import { getConsequencesList, createConsequence, deleteConsequence, getUsersList, createNotification } from '@/lib/firebase-db';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -20,11 +23,11 @@ export async function GET() {
   });
 
   if (user.role === 'ADMIN' || user.role === 'FOUNDER') {
-    return NextResponse.json({ consequences: enriched });
+    return NextResponse.json({ consequences: enriched }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   }
 
   const myConsequences = enriched.filter((c: any) => Number(c.user_id) === Number(user.id));
-  return NextResponse.json({ consequences: myConsequences });
+  return NextResponse.json({ consequences: myConsequences }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
 }
 
 export async function POST(request: Request) {
@@ -56,8 +59,27 @@ export async function POST(request: Request) {
       'CONSEQUENCE'
     );
 
-    return NextResponse.json({ consequence: cons });
+    return NextResponse.json({ consequence: cons }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Failed to issue consequence' }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  const user = await getCurrentUser();
+  if (!user || (user.role !== 'ADMIN' && user.role !== 'FOUNDER')) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  try {
+    const { id } = await request.json();
+    if (!id) {
+      return NextResponse.json({ error: 'Consequence ID required' }, { status: 400 });
+    }
+
+    await deleteConsequence(Number(id));
+    return NextResponse.json({ success: true }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Failed to remove consequence' }, { status: 500 });
   }
 }

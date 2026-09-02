@@ -8,10 +8,15 @@ export default function ConsequencesPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/consequences')
+    fetch(`/api/consequences?t=${Date.now()}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
-        if (data.consequences) setConsequences(data.consequences);
+        if (data.consequences) {
+          // Deduplicate by ID
+          const uniqueMap = new Map();
+          data.consequences.forEach((c: any) => uniqueMap.set(String(c.id), c));
+          setConsequences(Array.from(uniqueMap.values()));
+        }
         setLoading(false);
       });
   }, []);
@@ -23,7 +28,7 @@ export default function ConsequencesPage() {
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
-      {/* Header matching reference image */}
+      {/* Header */}
       <div>
         <div className="flex items-center gap-2.5 text-slate-800">
           <Shield className="w-6 h-6 text-purple-700" />

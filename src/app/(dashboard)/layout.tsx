@@ -18,7 +18,8 @@ import {
   ShieldAlert,
   Wrench,
   CheckCircle2,
-  AlertOctagon
+  AlertOctagon,
+  Settings
 } from 'lucide-react';
 import { database } from '@/lib/firebase';
 import { ref, onValue } from 'firebase/database';
@@ -213,11 +214,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const navItems = [
     { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { label: 'Allocations', href: '/allocations', icon: CalendarDays },
+    { label: 'Staff Directory', href: '/staff', icon: Users },
     { label: 'LOA / Reduced', href: '/loa', icon: Clock },
     { label: 'Reports', href: '/reports', icon: Flag },
     { label: 'Support', href: '/support', icon: LifeBuoy },
     { label: 'Consequences', href: '/consequences', icon: AlertTriangle },
-    { label: 'Flight Roster', href: '/roster', icon: Users },
+    { label: 'Flight Roster', href: '/roster', icon: CalendarDays },
+    { label: 'Settings', href: '/settings', icon: Settings },
   ];
 
   if (user?.role === 'ADMIN' || user?.role === 'FOUNDER') {
@@ -327,11 +330,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               )}
             </div>
 
-            {/* Profile Dropdown */}
-            <div className="flex items-center gap-3 pl-3 border-l border-purple-100">
-              <div className="w-9 h-9 bg-gradient-to-tr from-blue-600 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
-                {user?.preferred_name?.charAt(0) || 'U'}
-              </div>
+            {/* Profile Dropdown & Settings Link */}
+            <Link href="/settings" className="flex items-center gap-3 pl-3 border-l border-purple-100 hover:opacity-80 transition-all">
+              {user?.avatar_url ? (
+                <img src={user.avatar_url} alt={user.preferred_name} className="w-9 h-9 rounded-full object-cover border border-purple-200 shadow-md" />
+              ) : (
+                <div className="w-9 h-9 bg-gradient-to-tr from-blue-600 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
+                  {user?.preferred_name?.charAt(0) || 'U'}
+                </div>
+              )}
               <div className="text-left leading-tight">
                 <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                   <span>@{user?.roblox_username}</span>
@@ -349,7 +356,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   {user?.preferred_name}
                 </div>
               </div>
-            </div>
+            </Link>
           </div>
         </header>
 

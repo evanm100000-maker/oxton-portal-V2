@@ -16,10 +16,14 @@ export default function ReportsPage() {
   const [msg, setMsg] = useState<string | null>(null);
 
   const fetchReports = () => {
-    fetch('/api/reports')
+    fetch(`/api/reports?t=${Date.now()}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
-        if (data.reports) setReports(data.reports);
+        if (data.reports) {
+          const uniqueMap = new Map();
+          data.reports.forEach((r: any) => uniqueMap.set(String(r.id), r));
+          setReports(Array.from(uniqueMap.values()));
+        }
         setLoading(false);
       });
   };

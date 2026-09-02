@@ -19,7 +19,16 @@ async function fbFetch(endpoint: string, options?: RequestInit) {
   return res.json();
 }
 
-// Seed ONLY the Founder Account if missing. NEVER re-seed deleted flights or announcements.
+function deduplicateById<T extends { id: any }>(list: T[]): T[] {
+  const map = new Map<string, T>();
+  for (const item of list) {
+    if (item && item.id != null) {
+      map.set(String(item.id), item);
+    }
+  }
+  return Array.from(map.values());
+}
+
 export async function ensureFounderAccount() {
   try {
     const users = await fbFetch('users');
@@ -52,7 +61,8 @@ export async function getUsersList(): Promise<any[]> {
   await ensureFounderAccount();
   const data = await fbFetch('users');
   if (!data) return [];
-  return Object.values(data).filter(Boolean);
+  const list = Object.values(data).filter(Boolean) as any[];
+  return deduplicateById(list);
 }
 
 export async function getUserByEmail(email: string): Promise<any | null> {
@@ -94,7 +104,8 @@ export async function updateUser(id: number, updates: any): Promise<void> {
 export async function getFlightsList(): Promise<any[]> {
   const data = await fbFetch('flights');
   if (!data) return [];
-  return Object.values(data).filter(Boolean);
+  const list = Object.values(data).filter(Boolean) as any[];
+  return deduplicateById(list);
 }
 
 export async function createFlight(flightData: any): Promise<any> {
@@ -154,7 +165,8 @@ export async function saveAllocation(flightId: number, userId: number, status: s
 export async function getLOARequestsList(): Promise<any[]> {
   const data = await fbFetch('loa_requests');
   if (!data) return [];
-  return Object.values(data).filter(Boolean);
+  const list = Object.values(data).filter(Boolean) as any[];
+  return deduplicateById(list);
 }
 
 export async function createLOARequest(loaData: any): Promise<any> {
@@ -186,7 +198,8 @@ export async function updateLOARequest(id: number, updates: any): Promise<void> 
 export async function getReportsList(): Promise<any[]> {
   const data = await fbFetch('reports');
   if (!data) return [];
-  return Object.values(data).filter(Boolean);
+  const list = Object.values(data).filter(Boolean) as any[];
+  return deduplicateById(list);
 }
 
 export async function createReport(reportData: any): Promise<any> {
@@ -218,7 +231,8 @@ export async function updateReport(id: number, updates: any): Promise<void> {
 export async function getTicketsList(): Promise<any[]> {
   const data = await fbFetch('tickets');
   if (!data) return [];
-  return Object.values(data).filter(Boolean);
+  const list = Object.values(data).filter(Boolean) as any[];
+  return deduplicateById(list);
 }
 
 export async function createTicket(ticketData: any, initialMessage: string, senderName: string, senderRole: string): Promise<any> {
@@ -282,7 +296,8 @@ export async function updateTicket(id: number, updates: any): Promise<void> {
 export async function getConsequencesList(): Promise<any[]> {
   const data = await fbFetch('consequences');
   if (!data) return [];
-  return Object.values(data).filter(Boolean);
+  const list = Object.values(data).filter(Boolean) as any[];
+  return deduplicateById(list);
 }
 
 export async function createConsequence(consData: any): Promise<any> {
@@ -303,11 +318,18 @@ export async function createConsequence(consData: any): Promise<any> {
   return newCons;
 }
 
+export async function deleteConsequence(id: number): Promise<void> {
+  await fbFetch(`consequences/${id}`, {
+    method: 'DELETE'
+  });
+}
+
 // --- ANNOUNCEMENTS ---
 export async function getAnnouncementsList(): Promise<any[]> {
   const data = await fbFetch('announcements');
   if (!data) return [];
-  return Object.values(data).filter(Boolean);
+  const list = Object.values(data).filter(Boolean) as any[];
+  return deduplicateById(list);
 }
 
 export async function createAnnouncement(annData: any): Promise<any> {
@@ -338,11 +360,12 @@ export async function deleteAnnouncement(id: number): Promise<void> {
 export async function getNotificationsList(userId?: number): Promise<any[]> {
   const data = await fbFetch('notifications');
   if (!data) return [];
-  const list = Object.values(data).filter(Boolean);
+  const list = Object.values(data).filter(Boolean) as any[];
+  const uniqueList = deduplicateById(list);
   if (userId) {
-    return list.filter((n: any) => Number(n.user_id) === Number(userId));
+    return uniqueList.filter((n: any) => Number(n.user_id) === Number(userId));
   }
-  return list;
+  return uniqueList;
 }
 
 export async function createNotification(userId: number, title: string, message: string, type = 'INFO'): Promise<void> {
@@ -392,16 +415,18 @@ export async function getActiveSystemAlert(): Promise<any | null> {
   const data = await fbFetch('alerts');
   if (!data) return null;
   const list = Object.values(data).filter(Boolean) as any[];
-  const active = list.filter((a) => a.is_active === 1).sort((a, b) => b.id - a.id);
+  const uniqueList = deduplicateById(list);
+  const active = uniqueList.filter((a) => a.is_active === 1).sort((a, b) => b.id - a.id);
   return active.length > 0 ? active[0] : null;
 }
 
 export async function createSystemAlert(title: string, message: string, severity = 'WARNING'): Promise<void> {
   const data = await fbFetch('alerts');
   const list = data ? Object.values(data).filter(Boolean) as any[] : [];
-  const nextId = list.length > 0 ? Math.max(...list.map((a) => Number(a.id) || 0)) + 1 : 1;
+  const uniqueList = deduplicateById(list);
+  const nextId = uniqueList.length > 0 ? Math.max(...uniqueList.map((a) => Number(a.id) || 0)) + 1 : 1;
 
-  for (const a of list) {
+  for (const a of uniqueList) {
     if (a.is_active) {
       await fbFetch(`alerts/${a.id}`, {
         method: 'PATCH',

@@ -30,7 +30,7 @@ import {
 
 export default function AdminPanelPage() {
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'SIGNUPS' | 'FLIGHTS' | 'LOA' | 'ROSTER' | 'CONSEQUENCES' | 'TICKETS' | 'REPORTS' | 'ANNOUNCEMENTS' | 'STAFF_ADMINS' | 'MAINTENANCE_ALERTS'>('SIGNUPS');
+  const [activeTab, setActiveTab] = useState<'SIGNUPS' | 'FLIGHTS' | 'LOA' | 'ROSTER' | 'CONSEQUENCES' | 'TICKETS' | 'REPORTS' | 'ANNOUNCEMENTS' | 'STAFF_ADMINS' | 'MAINTENANCE_ALERTS'>('STAFF_ADMINS');
 
   const [users, setUsers] = useState<any[]>([]);
   const [flights, setFlights] = useState<any[]>([]);
@@ -38,6 +38,7 @@ export default function AdminPanelPage() {
   const [roster, setRoster] = useState<any[]>([]);
   const [tickets, setTickets] = useState<any[]>([]);
   const [reports, setReports] = useState<any[]>([]);
+  const [consequences, setConsequences] = useState<any[]>([]);
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -73,39 +74,43 @@ export default function AdminPanelPage() {
 
   const fetchAllAdminData = async () => {
     try {
-      const meRes = await fetch('/api/auth/me');
+      const meRes = await fetch(`/api/auth/me?t=${Date.now()}`, { cache: 'no-store' });
       const meData = await meRes.json();
       if (meData.user) setCurrentUser(meData.user);
 
-      const usersRes = await fetch('/api/admin/users');
+      const usersRes = await fetch(`/api/admin/users?t=${Date.now()}`, { cache: 'no-store' });
       const usersData = await usersRes.json();
       if (usersData.users) setUsers(usersData.users);
 
-      const flightsRes = await fetch('/api/flights');
+      const flightsRes = await fetch(`/api/flights?t=${Date.now()}`, { cache: 'no-store' });
       const flightsData = await flightsRes.json();
       if (flightsData.flights) setFlights(flightsData.flights);
 
-      const loaRes = await fetch('/api/loa');
+      const loaRes = await fetch(`/api/loa?t=${Date.now()}`, { cache: 'no-store' });
       const loaData = await loaRes.json();
       if (loaData.requests) setLoaRequests(loaData.requests);
 
-      const rosterRes = await fetch('/api/admin/roster-infraction');
+      const rosterRes = await fetch(`/api/admin/roster-infraction?t=${Date.now()}`, { cache: 'no-store' });
       const rosterData = await rosterRes.json();
       if (rosterData.roster) setRoster(rosterData.roster);
 
-      const ticketsRes = await fetch('/api/tickets');
+      const ticketsRes = await fetch(`/api/tickets?t=${Date.now()}`, { cache: 'no-store' });
       const ticketsData = await ticketsRes.json();
       if (ticketsData.tickets) setTickets(ticketsData.tickets);
 
-      const reportsRes = await fetch('/api/reports');
+      const reportsRes = await fetch(`/api/reports?t=${Date.now()}`, { cache: 'no-store' });
       const reportsData = await reportsRes.json();
       if (reportsData.reports) setReports(reportsData.reports);
 
-      const annRes = await fetch('/api/announcements');
+      const consRes = await fetch(`/api/consequences?t=${Date.now()}`, { cache: 'no-store' });
+      const consData = await consRes.json();
+      if (consData.consequences) setConsequences(consData.consequences);
+
+      const annRes = await fetch(`/api/announcements?t=${Date.now()}`, { cache: 'no-store' });
       const annData = await annRes.json();
       if (annData.announcements) setAnnouncements(annData.announcements);
 
-      const alertsRes = await fetch('/api/system-alerts');
+      const alertsRes = await fetch(`/api/system-alerts?t=${Date.now()}`, { cache: 'no-store' });
       const alertsData = await alertsRes.json();
       if (alertsData) {
         setMaintEnabled(alertsData.maintenance_mode);
@@ -150,6 +155,21 @@ export default function AdminPanelPage() {
       alert(`Error: ${data.error}`);
     } else {
       setFeedback(`User role updated to ${role}.`);
+      fetchAllAdminData();
+    }
+  };
+
+  const handleRemoveConsequence = async (consId: number) => {
+    if (!confirm('Are you sure you want to remove/revoke this consequence?')) return;
+    setConsequences((prev) => prev.filter((c) => c.id !== consId));
+
+    const res = await fetch('/api/consequences', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: consId }),
+    });
+    if (res.ok) {
+      setFeedback('Consequence removed.');
       fetchAllAdminData();
     }
   };
@@ -385,7 +405,7 @@ export default function AdminPanelPage() {
               <div>
                 <h1 className="text-2xl font-black tracking-tight">Executive Admin Portal</h1>
                 <p className="text-purple-100 text-xs font-medium mt-0.5">
-                  High-Rank operations, signups, flight registers, LOAs, staff management, and real-time alerts.
+                  High-Rank operations, signups, flight registers, LOAs, staff management, consequences, and system alerts.
                 </p>
               </div>
             </div>
@@ -412,6 +432,16 @@ export default function AdminPanelPage() {
       {/* Tabs */}
       <div className="flex flex-wrap gap-2 border-b border-purple-100 bg-white p-2 rounded-2xl shadow-md overflow-x-auto text-xs font-bold">
         <button
+          onClick={() => setActiveTab('STAFF_ADMINS')}
+          className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 ${
+            activeTab === 'STAFF_ADMINS' ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-purple-50'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          Staff Directory & Admins ({activeStaff.length})
+        </button>
+
+        <button
           onClick={() => setActiveTab('SIGNUPS')}
           className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 ${
             activeTab === 'SIGNUPS' ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-purple-50'
@@ -424,16 +454,6 @@ export default function AdminPanelPage() {
               {pendingSignups.length}
             </span>
           )}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('STAFF_ADMINS')}
-          className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 ${
-            activeTab === 'STAFF_ADMINS' ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-purple-50'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          Staff Directory & Admins
         </button>
 
         <button
@@ -473,7 +493,7 @@ export default function AdminPanelPage() {
           }`}
         >
           <AlertTriangle className="w-4 h-4" />
-          Consequences
+          Consequences ({consequences.length})
         </button>
 
         <button
@@ -517,7 +537,119 @@ export default function AdminPanelPage() {
         </button>
       </div>
 
-      {/* TAB 1: PENDING SIGNUPS */}
+      {/* TAB 1: ALL STAFF & ADMIN MANAGEMENT WITH CONSEQUENCES */}
+      {activeTab === 'STAFF_ADMINS' && (
+        <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
+          <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <Users className="w-5 h-5 text-purple-600" /> Staff Directory, Role Management & Consequences
+              </h3>
+              <p className="text-xs text-slate-500">
+                All staff members are listed with their role badges displayed next to their names. View or remove active consequences and change user roles.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {activeStaff.map((u) => {
+              const userCons = consequences.filter((c) => Number(c.user_id) === Number(u.id));
+              return (
+                <div key={u.id} className="p-5 bg-purple-50/40 rounded-3xl border border-purple-100 space-y-3 text-xs">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      {u.avatar_url ? (
+                        <img src={u.avatar_url} alt={u.preferred_name} className="w-12 h-12 rounded-2xl object-cover border border-purple-200" />
+                      ) : (
+                        <div className="w-12 h-12 bg-gradient-to-tr from-blue-600 to-purple-600 text-white font-bold rounded-2xl flex items-center justify-center text-base shadow-md">
+                          {u.preferred_name.charAt(0)}
+                        </div>
+                      )}
+
+                      <div className="space-y-0.5">
+                        <div className="font-extrabold text-slate-800 text-sm flex items-center gap-2 flex-wrap">
+                          <span>{u.preferred_name}</span>
+                          {/* Role Badge explicitly next to name */}
+                          <span className={`px-2 py-0.5 rounded font-extrabold text-[10px] uppercase tracking-wider ${
+                            u.role === 'FOUNDER'
+                              ? 'bg-purple-200 text-purple-900 border border-purple-300'
+                              : u.role === 'ADMIN'
+                              ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                              : 'bg-slate-100 text-slate-700 border border-slate-200'
+                          }`}>
+                            {u.role}
+                          </span>
+                        </div>
+                        <div className="text-slate-500 font-medium">Roblox: @{u.roblox_username} | Discord: {u.discord_username}</div>
+                      </div>
+                    </div>
+
+                    {/* Action buttons */}
+                    {u.role !== 'FOUNDER' && (
+                      <div className="flex items-center gap-2">
+                        {u.role === 'ADMIN' ? (
+                          <button
+                            onClick={() => handleUpdateRole(u.id, 'STAFF')}
+                            className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md text-xs"
+                          >
+                            Remove from Admin Team
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleUpdateRole(u.id, 'ADMIN')}
+                            className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white font-bold rounded-xl shadow-md text-xs"
+                          >
+                            Promote to Admin Team
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Consequences List for this user */}
+                  <div className="border-t border-purple-100/80 pt-3">
+                    <div className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-2">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                      Issued Consequences ({userCons.length})
+                    </div>
+
+                    {userCons.length === 0 ? (
+                      <p className="text-[11px] text-slate-400 italic">No disciplinary consequences on record for this staff member.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {userCons.map((c) => (
+                          <div key={c.id} className="p-3 bg-white rounded-2xl border border-purple-100 flex items-center justify-between gap-3">
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className={`px-2 py-0.5 rounded font-extrabold text-[10px] ${
+                                  c.type === 'SUSPENSION' ? 'bg-rose-100 text-rose-800' : c.type === 'INFRACTION' ? 'bg-orange-100 text-orange-800' : 'bg-amber-100 text-amber-800'
+                                }`}>
+                                  {c.type.replace('_', ' ')}
+                                </span>
+                                <span className="font-bold text-slate-800 text-xs">{c.reason}</span>
+                              </div>
+                              <p className="text-slate-500 text-[11px]">Issued by: {c.issuer_name} | {new Date(c.created_at).toLocaleDateString()}</p>
+                            </div>
+
+                            <button
+                              onClick={() => handleRemoveConsequence(c.id)}
+                              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-[11px] flex items-center gap-1 shadow-sm"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" /> Remove Consequence
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: PENDING SIGNUPS */}
       {activeTab === 'SIGNUPS' && (
         <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
           <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-3">Pending Registration Requests</h3>
@@ -550,58 +682,6 @@ export default function AdminPanelPage() {
               ))}
             </div>
           )}
-        </div>
-      )}
-
-      {/* TAB 2: ALL STAFF & ADMIN MANAGEMENT */}
-      {activeTab === 'STAFF_ADMINS' && (
-        <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
-          <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                <Users className="w-5 h-5 text-purple-600" /> Staff Directory & Admin Management
-              </h3>
-              <p className="text-xs text-slate-500">Manage staff account roles. Admins and Founder can promote or demote admin team members.</p>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            {activeStaff.map((u) => (
-              <div key={u.id} className="p-4 bg-purple-50/40 rounded-2xl border border-purple-100 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-                <div className="space-y-0.5">
-                  <div className="font-extrabold text-slate-800 text-sm flex items-center gap-2">
-                    {u.preferred_name} (@{u.roblox_username})
-                    <span className={`px-2 py-0.5 rounded font-bold text-[10px] ${
-                      u.role === 'FOUNDER' ? 'bg-purple-200 text-purple-900' : u.role === 'ADMIN' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'
-                    }`}>
-                      {u.role}
-                    </span>
-                  </div>
-                  <div className="text-slate-500">Email: {u.email} | Discord: {u.discord_username}</div>
-                </div>
-
-                {u.role !== 'FOUNDER' && (
-                  <div>
-                    {u.role === 'ADMIN' ? (
-                      <button
-                        onClick={() => handleUpdateRole(u.id, 'STAFF')}
-                        className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md text-xs"
-                      >
-                        Remove from Admin Team
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => handleUpdateRole(u.id, 'ADMIN')}
-                        className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white font-bold rounded-xl shadow-md text-xs"
-                      >
-                        Promote to Admin Team
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
         </div>
       )}
 
