@@ -18,9 +18,10 @@ import {
   ShieldAlert,
   Wrench,
   CheckCircle2,
-  AlertOctagon,
-  XCircle
+  AlertOctagon
 } from 'lucide-react';
+import { database } from '@/lib/firebase';
+import { ref, onValue } from 'firebase/database';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -33,12 +34,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
 
-  // System states
+  // System states from Firebase WebSocket
   const [suspension, setSuspension] = useState<any>(null);
   const [maintenance, setMaintenance] = useState<{ active: boolean; message: string }>({ active: false, message: '' });
   const [systemAlert, setSystemAlert] = useState<any>(null);
 
-  const checkUserAndAlerts = () => {
+  useEffect(() => {
+    // 1. User check
     fetch(`/api/auth/me?t=${Date.now()}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
@@ -56,20 +58,35 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         router.push('/login');
       });
 
-    fetch(`/api/system-alerts?t=${Date.now()}`, { cache: 'no-store' })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data) {
-          setMaintenance({ active: data.maintenance_mode, message: data.maintenance_message });
-          setSystemAlert(data.alert);
-        }
-      });
-  };
+    // 2. Real-time Firebase listener for Maintenance Settings
+    const settingsRef = ref(database, 'settings');
+    const unsubSettings = onValue(settingsRef, (snapshot) => {
+      const val = snapshot.val();
+      if (val) {
+        setMaintenance({
+          active: val.maintenance_mode === '1',
+          message: val.maintenance_message || 'Website is currently under scheduled maintenance.'
+        });
+      }
+    });
 
-  useEffect(() => {
-    checkUserAndAlerts();
-    const interval = setInterval(checkUserAndAlerts, 3000);
-    return () => clearInterval(interval);
+    // 3. Real-time Firebase listener for Warning Banners
+    const alertsRef = ref(database, 'alerts');
+    const unsubAlerts = onValue(alertsRef, (snapshot) => {
+      const val = snapshot.val();
+      if (val) {
+        const list = Object.values(val).filter(Boolean) as any[];
+        const active = list.filter((a) => a.is_active === 1).sort((a, b) => b.id - a.id);
+        setSystemAlert(active.length > 0 ? active[0] : null);
+      } else {
+        setSystemAlert(null);
+      }
+    });
+
+    return () => {
+      unsubSettings();
+      unsubAlerts();
+    };
   }, []);
 
   const fetchNotifications = () => {
@@ -87,7 +104,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     if (user && !suspension) {
       fetchNotifications();
-      const interval = setInterval(fetchNotifications, 5000);
+      const interval = setInterval(fetchNotifications, 4000);
       return () => clearInterval(interval);
     }
   }, [user, suspension]);

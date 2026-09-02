@@ -2,10 +2,13 @@
 
 import React, { useEffect, useState } from 'react';
 import { LifeBuoy, Send, PlusCircle, MessageSquare, AlertCircle, CheckCircle2, Shield } from 'lucide-react';
+import { database } from '@/lib/firebase';
+import { ref, onValue } from 'firebase/database';
 
 export default function SupportPage() {
   const [tickets, setTickets] = useState<any[]>([]);
   const [activeTicketId, setActiveTicketId] = useState<number | null>(null);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
 
@@ -16,25 +19,30 @@ export default function SupportPage() {
   const [replyMessage, setReplyMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const fetchTickets = () => {
-    fetch('/api/tickets')
+  useEffect(() => {
+    fetch('/api/auth/me')
       .then((res) => res.json())
       .then((data) => {
-        if (data.tickets) {
-          setTickets(data.tickets);
-          if (data.tickets.length > 0 && activeTicketId === null) {
-            setActiveTicketId(data.tickets[0].id);
-          }
-        }
-        setLoading(false);
+        if (data.user) setCurrentUser(data.user);
       });
-  };
 
-  useEffect(() => {
-    fetchTickets();
-    // Live Auto Refresh Polling every 2 seconds for ticket chat
-    const interval = setInterval(fetchTickets, 2000);
-    return () => clearInterval(interval);
+    // Real-time Firebase WebSocket listener for Tickets
+    const ticketsRef = ref(database, 'tickets');
+    const unsubscribe = onValue(ticketsRef, (snapshot) => {
+      const val = snapshot.val();
+      if (val) {
+        const list = Object.values(val).filter(Boolean) as any[];
+        setTickets(list);
+        if (list.length > 0 && activeTicketId === null) {
+          setActiveTicketId(list[0].id);
+        }
+      } else {
+        setTickets([]);
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const handleCreateTicket = async (e: React.FormEvent) => {
@@ -59,7 +67,6 @@ export default function SupportPage() {
       setSubject('');
       setInitialMessage('');
       setShowModal(false);
-      fetchTickets();
     } catch (err: any) {
       alert(`Error: ${err.message}`);
     } finally {
@@ -75,7 +82,7 @@ export default function SupportPage() {
     setReplyMessage('');
 
     try {
-      const res = await fetch('/api/tickets', {
+      await fetch('/api/tickets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -84,14 +91,14 @@ export default function SupportPage() {
           message: currentText,
         }),
       });
-
-      if (res.ok) {
-        fetchTickets();
-      }
     } catch (err) {
       console.error('Ticket reply error:', err);
     }
   };
+
+  const visibleTickets = (currentUser?.role === 'ADMIN' || currentUser?.role === 'FOUNDER')
+    ? tickets
+    : tickets.filter((t) => Number(t.user_id) === Number(currentUser?.id));
 
   const activeTicket = tickets.find((t) => Number(t.id) === Number(activeTicketId));
 
@@ -190,10 +197,10 @@ export default function SupportPage() {
           <div className="flex-1 overflow-y-auto space-y-2 pr-1">
             {loading ? (
               <p className="text-xs text-slate-400 text-center py-6">Loading tickets...</p>
-            ) : tickets.length === 0 ? (
+            ) : visibleTickets.length === 0 ? (
               <p className="text-xs text-slate-400 text-center py-6">No support tickets found.</p>
             ) : (
-              tickets.map((t) => (
+              visibleTickets.map((t) => (
                 <button
                   key={t.id}
                   onClick={() => setActiveTicketId(t.id)}
@@ -234,7 +241,7 @@ export default function SupportPage() {
                       {activeTicket.status}
                     </span>
                   </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">Opened by @{activeTicket.roblox_username}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Opened by @{activeTicket.roblox_username || 'Staff'}</p>
                 </div>
               </div>
 

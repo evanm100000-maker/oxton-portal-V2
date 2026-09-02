@@ -3,6 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import { Plane, Calendar, UserCheck, HelpCircle, UserX, Clock, ChevronDown, ChevronUp, CheckCircle2, AlertCircle, XCircle, ClipboardCheck } from 'lucide-react';
 import { formatDateLocal } from '@/lib/utils';
+import { database } from '@/lib/firebase';
+import { ref, onValue } from 'firebase/database';
 
 export default function AllocationsPage() {
   const [user, setUser] = useState<any>(null);
@@ -17,15 +19,11 @@ export default function AllocationsPage() {
   const [registerSubmitting, setRegisterSubmitting] = useState(false);
   const [registerMsg, setRegisterMsg] = useState<string | null>(null);
 
-  const fetchUserAndFlights = async () => {
+  const fetchUserAndStaff = async () => {
     try {
       const meRes = await fetch('/api/auth/me');
       const meData = await meRes.json();
       if (meData.user) setUser(meData.user);
-
-      const flightsRes = await fetch('/api/flights');
-      const flightsData = await flightsRes.json();
-      if (flightsData.flights) setFlights(flightsData.flights);
 
       if (meData.user && (meData.user.role === 'ADMIN' || meData.user.role === 'FOUNDER')) {
         const usersRes = await fetch('/api/admin/users');
@@ -35,52 +33,61 @@ export default function AllocationsPage() {
         }
       }
     } catch (err) {
-      console.error('Error fetching allocations data:', err);
-    } finally {
-      setLoading(false);
+      console.error('Error fetching user data:', err);
     }
   };
 
   useEffect(() => {
-    fetchUserAndFlights();
-    // Live Auto Refresh Polling every 3 seconds
-    const interval = setInterval(fetchUserAndFlights, 3000);
-    return () => clearInterval(interval);
+    fetchUserAndStaff();
+
+    // Live Firebase WebSocket Listener for Flights & Allocations
+    const flightsRef = ref(database, 'flights');
+    const unsubFlights = onValue(flightsRef, async () => {
+      try {
+        const res = await fetch(`/api/flights?t=${Date.now()}`, { cache: 'no-store' });
+        const data = await res.json();
+        if (data.flights) setFlights(data.flights);
+      } catch (err) {
+        console.error('Error refreshing flights:', err);
+      } finally {
+        setLoading(false);
+      }
+    });
+
+    const allocRef = ref(database, 'allocations');
+    const unsubAlloc = onValue(allocRef, async () => {
+      try {
+        const res = await fetch(`/api/flights?t=${Date.now()}`, { cache: 'no-store' });
+        const data = await res.json();
+        if (data.flights) setFlights(data.flights);
+      } catch (err) {
+        console.error('Error refreshing allocations:', err);
+      }
+    });
+
+    return () => {
+      unsubFlights();
+      unsubAlloc();
+    };
   }, []);
 
   const handleAllocation = async (flightId: number, status: 'ATTENDING' | 'UNSURE' | 'ABSENT') => {
-    // Optimistic Immediate State Update (No refresh required)
+    // Immediate Optimistic Update
     setFlights((prevFlights) =>
       prevFlights.map((f) => {
         if (f.id === flightId) {
-          const currentAllocations = f.allocations || [];
-          const otherAllocations = currentAllocations.filter((a: any) => Number(a.user_id) !== Number(user?.id));
-          const newAlloc = {
-            user_id: user?.id,
-            status,
-            preferred_name: user?.preferred_name,
-            roblox_username: user?.roblox_username,
-            role: user?.role,
-          };
-          return {
-            ...f,
-            my_status: status,
-            allocations: [...otherAllocations, newAlloc],
-          };
+          return { ...f, my_status: status };
         }
         return f;
       })
     );
 
     try {
-      const res = await fetch('/api/allocations', {
+      await fetch('/api/allocations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ flight_id: flightId, status }),
       });
-      if (res.ok) {
-        fetchUserAndFlights();
-      }
     } catch (err) {
       console.error('Allocation update error:', err);
     }
@@ -91,7 +98,7 @@ export default function AllocationsPage() {
     const initialMap: Record<number, 'PRESENT' | 'LATE' | 'ABSENT'> = {};
 
     activeStaff.forEach((s) => {
-      const existingAlloc = flight.allocations.find((a: any) => Number(a.user_id) === Number(s.id));
+      const existingAlloc = flight.allocations?.find((a: any) => Number(a.user_id) === Number(s.id));
       if (existingAlloc && existingAlloc.attendance_status && existingAlloc.attendance_status !== 'NONE') {
         initialMap[s.id] = existingAlloc.attendance_status;
       } else if (existingAlloc && existingAlloc.status === 'ATTENDING') {
@@ -121,7 +128,6 @@ export default function AllocationsPage() {
 
       if (res.ok) {
         setRegisterMsg('Flight attendance register saved successfully!');
-        fetchUserAndFlights();
         setTimeout(() => {
           setSelectedRegisterFlight(null);
           setRegisterMsg(null);
@@ -154,9 +160,9 @@ export default function AllocationsPage() {
       ) : (
         <div className="space-y-4">
           {flights.map((flight) => {
-            const attending = flight.allocations.filter((a: any) => a.status === 'ATTENDING');
-            const unsure = flight.allocations.filter((a: any) => a.status === 'UNSURE');
-            const absent = flight.allocations.filter((a: any) => a.status === 'ABSENT');
+            const attending = flight.allocations?.filter((a: any) => a.status === 'ATTENDING') || [];
+            const unsure = flight.allocations?.filter((a: any) => a.status === 'UNSURE') || [];
+            const absent = flight.allocations?.filter((a: any) => a.status === 'ABSENT') || [];
             const isExpanded = expandedFlightId === flight.id;
             const isAdmin = user?.role === 'ADMIN' || user?.role === 'FOUNDER';
 
