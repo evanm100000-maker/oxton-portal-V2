@@ -27,6 +27,9 @@ import {
   Power,
   Trash2
 } from 'lucide-react';
+import { database } from '@/lib/firebase';
+import { ref, onValue } from 'firebase/database';
+import { parseFirebaseSnapshot } from '@/lib/realtime-sync';
 
 export default function AdminPanelPage() {
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -35,7 +38,6 @@ export default function AdminPanelPage() {
   const [users, setUsers] = useState<any[]>([]);
   const [flights, setFlights] = useState<any[]>([]);
   const [loaRequests, setLoaRequests] = useState<any[]>([]);
-  const [roster, setRoster] = useState<any[]>([]);
   const [tickets, setTickets] = useState<any[]>([]);
   const [reports, setReports] = useState<any[]>([]);
   const [consequences, setConsequences] = useState<any[]>([]);
@@ -72,67 +74,57 @@ export default function AdminPanelPage() {
 
   const [feedback, setFeedback] = useState<string | null>(null);
 
-  const fetchAllAdminData = async () => {
-    try {
-      const meRes = await fetch(`/api/auth/me?t=${Date.now()}`, { cache: 'no-store' });
-      const meData = await meRes.json();
-      if (meData.user) setCurrentUser(meData.user);
-
-      const usersRes = await fetch(`/api/admin/users?t=${Date.now()}`, { cache: 'no-store' });
-      const usersData = await usersRes.json();
-      if (usersData.users) setUsers(usersData.users);
-
-      const flightsRes = await fetch(`/api/flights?t=${Date.now()}`, { cache: 'no-store' });
-      const flightsData = await flightsRes.json();
-      if (flightsData.flights) setFlights(flightsData.flights);
-
-      const loaRes = await fetch(`/api/loa?t=${Date.now()}`, { cache: 'no-store' });
-      const loaData = await loaRes.json();
-      if (loaData.requests) setLoaRequests(loaData.requests);
-
-      const rosterRes = await fetch(`/api/admin/roster-infraction?t=${Date.now()}`, { cache: 'no-store' });
-      const rosterData = await rosterRes.json();
-      if (rosterData.roster) setRoster(rosterData.roster);
-
-      const ticketsRes = await fetch(`/api/tickets?t=${Date.now()}`, { cache: 'no-store' });
-      const ticketsData = await ticketsRes.json();
-      if (ticketsData.tickets) setTickets(ticketsData.tickets);
-
-      const reportsRes = await fetch(`/api/reports?t=${Date.now()}`, { cache: 'no-store' });
-      const reportsData = await reportsRes.json();
-      if (reportsData.reports) setReports(reportsData.reports);
-
-      const consRes = await fetch(`/api/consequences?t=${Date.now()}`, { cache: 'no-store' });
-      const consData = await consRes.json();
-      if (consData.consequences) setConsequences(consData.consequences);
-
-      const annRes = await fetch(`/api/announcements?t=${Date.now()}`, { cache: 'no-store' });
-      const annData = await annRes.json();
-      if (annData.announcements) setAnnouncements(annData.announcements);
-
-      const alertsRes = await fetch(`/api/system-alerts?t=${Date.now()}`, { cache: 'no-store' });
-      const alertsData = await alertsRes.json();
-      if (alertsData) {
-        setMaintEnabled(alertsData.maintenance_mode);
-        if (alertsData.maintenance_message) setMaintMessage(alertsData.maintenance_message);
-        if (alertsData.alert) setCurrentAlert(alertsData.alert);
-      }
-    } catch (err) {
-      console.error('Admin data fetch error:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchAllAdminData();
-    const interval = setInterval(fetchAllAdminData, 3000);
-    return () => clearInterval(interval);
+    fetch(`/api/auth/me?t=${Date.now()}`, { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.user) setCurrentUser(data.user);
+      });
+
+    // Attach direct Firebase WebSockets listeners for instant real-time sync across all devices
+    const unsubUsers = onValue(ref(database, 'users'), (snap) => setUsers(parseFirebaseSnapshot(snap)));
+    const unsubFlights = onValue(ref(database, 'flights'), (snap) => setFlights(parseFirebaseSnapshot(snap)));
+    const unsubLoa = onValue(ref(database, 'loa_requests'), (snap) => setLoaRequests(parseFirebaseSnapshot(snap)));
+    const unsubTickets = onValue(ref(database, 'tickets'), (snap) => setTickets(parseFirebaseSnapshot(snap)));
+    const unsubReports = onValue(ref(database, 'reports'), (snap) => setReports(parseFirebaseSnapshot(snap)));
+    const unsubCons = onValue(ref(database, 'consequences'), (snap) => setConsequences(parseFirebaseSnapshot(snap)));
+    const unsubAnn = onValue(ref(database, 'announcements'), (snap) => setAnnouncements(parseFirebaseSnapshot(snap)));
+
+    const unsubSettings = onValue(ref(database, 'settings'), (snap) => {
+      const val = snap.val();
+      if (val) {
+        setMaintEnabled(val.maintenance_mode === '1');
+        if (val.maintenance_message) setMaintMessage(val.maintenance_message);
+      }
+    });
+
+    const unsubAlerts = onValue(ref(database, 'alerts'), (snap) => {
+      const val = snap.val();
+      if (val) {
+        const list = Object.values(val).filter(Boolean) as any[];
+        const active = list.filter((a) => a.is_active === 1).sort((a, b) => b.id - a.id);
+        setCurrentAlert(active.length > 0 ? active[0] : null);
+      } else {
+        setCurrentAlert(null);
+      }
+    });
+
+    setLoading(false);
+
+    return () => {
+      unsubUsers();
+      unsubFlights();
+      unsubLoa();
+      unsubTickets();
+      unsubReports();
+      unsubCons();
+      unsubAnn();
+      unsubSettings();
+      unsubAlerts();
+    };
   }, []);
 
   const handleApproveSignup = async (userId: number, status: 'ACTIVE' | 'DECLINED') => {
-    setUsers((prev) => prev.filter((u) => u.id !== userId));
-
     const res = await fetch('/api/admin/users', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -140,7 +132,6 @@ export default function AdminPanelPage() {
     });
     if (res.ok) {
       setFeedback(`Signup request ${status === 'ACTIVE' ? 'Accepted' : 'Declined'}.`);
-      fetchAllAdminData();
     }
   };
 
@@ -155,14 +146,11 @@ export default function AdminPanelPage() {
       alert(`Error: ${data.error}`);
     } else {
       setFeedback(`User role updated to ${role}.`);
-      fetchAllAdminData();
     }
   };
 
   const handleRemoveConsequence = async (consId: number) => {
     if (!confirm('Are you sure you want to remove/revoke this consequence?')) return;
-    setConsequences((prev) => prev.filter((c) => c.id !== consId));
-
     const res = await fetch('/api/consequences', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -170,7 +158,6 @@ export default function AdminPanelPage() {
     });
     if (res.ok) {
       setFeedback('Consequence removed.');
-      fetchAllAdminData();
     }
   };
 
@@ -192,14 +179,11 @@ export default function AdminPanelPage() {
       setHostName('');
       setAircraft('');
       setFlightDateTime('');
-      fetchAllAdminData();
     }
   };
 
   const handleDeleteFlight = async (flightId: number) => {
     if (!confirm('Are you sure you want to permanently delete this flight?')) return;
-    setFlights((prev) => prev.filter((f) => f.id !== flightId));
-
     const res = await fetch('/api/flights', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -207,14 +191,11 @@ export default function AdminPanelPage() {
     });
     if (res.ok) {
       setFeedback('Flight permanently deleted.');
-      fetchAllAdminData();
     }
   };
 
   const handleDeleteAnnouncement = async (annId: number) => {
     if (!confirm('Are you sure you want to delete this announcement?')) return;
-    setAnnouncements((prev) => prev.filter((a) => a.id !== annId));
-
     const res = await fetch('/api/announcements', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -222,7 +203,6 @@ export default function AdminPanelPage() {
     });
     if (res.ok) {
       setFeedback('Announcement deleted.');
-      fetchAllAdminData();
     }
   };
 
@@ -255,7 +235,6 @@ export default function AdminPanelPage() {
     if (res.ok) {
       setFeedback(`Flight attendance register saved for ${selectedFlight.flight_code}!`);
       setSelectedFlight(null);
-      fetchAllAdminData();
     }
   };
 
@@ -267,7 +246,6 @@ export default function AdminPanelPage() {
     });
     if (res.ok) {
       setFeedback(`LOA request ${status.toLowerCase()}.`);
-      fetchAllAdminData();
     }
   };
 
@@ -282,7 +260,6 @@ export default function AdminPanelPage() {
       alert(`Error: ${data.error}`);
     } else {
       setFeedback('Infraction issued for missed weekly quota!');
-      fetchAllAdminData();
     }
   };
 
@@ -314,7 +291,6 @@ export default function AdminPanelPage() {
       setConsReason('');
       setConsNotes('');
       setConsUserId('');
-      fetchAllAdminData();
     }
   };
 
@@ -329,14 +305,11 @@ export default function AdminPanelPage() {
       setFeedback('Announcement published to main dashboard!');
       setAnnTitle('');
       setAnnContent('');
-      fetchAllAdminData();
     }
   };
 
   const handleToggleMaintenance = async () => {
     const nextState = !maintEnabled;
-    setMaintEnabled(nextState);
-
     const res = await fetch('/api/admin/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -348,7 +321,6 @@ export default function AdminPanelPage() {
     });
     if (res.ok) {
       setFeedback(`Website Maintenance Mode turned ${nextState ? 'ON (Locked)' : 'OFF (Open)'}.`);
-      fetchAllAdminData();
     }
   };
 
@@ -366,7 +338,6 @@ export default function AdminPanelPage() {
     });
     if (res.ok) {
       setFeedback(`System Warning Banner published (${alertSeverity})!`);
-      fetchAllAdminData();
     }
   };
 
@@ -381,13 +352,11 @@ export default function AdminPanelPage() {
     });
     if (res.ok) {
       setFeedback('System Warning Banner resolved/cleared.');
-      fetchAllAdminData();
     }
   };
 
   const pendingSignups = users.filter((u) => u.status === 'PENDING');
   const activeStaff = users.filter((u) => u.status === 'ACTIVE');
-  const nonCompliantRoster = roster.filter((item) => !item.isCompliant && item.quota.statusBadge === 'ACTIVE');
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -405,7 +374,7 @@ export default function AdminPanelPage() {
               <div>
                 <h1 className="text-2xl font-black tracking-tight">Executive Admin Portal</h1>
                 <p className="text-purple-100 text-xs font-medium mt-0.5">
-                  High-Rank operations, signups, flight registers, LOAs, staff management, consequences, and system alerts.
+                  High-Rank operations, signups, flight registers, LOAs, staff management, consequences, and system alerts. Realtime WebSocket sync active.
                 </p>
               </div>
             </div>
@@ -473,17 +442,7 @@ export default function AdminPanelPage() {
           }`}
         >
           <Clock className="w-4 h-4" />
-          LOA Applications
-        </button>
-
-        <button
-          onClick={() => setActiveTab('ROSTER')}
-          className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 ${
-            activeTab === 'ROSTER' ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-purple-50'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          Quota Deficit ({nonCompliantRoster.length})
+          LOA Applications ({loaRequests.length})
         </button>
 
         <button
@@ -523,7 +482,7 @@ export default function AdminPanelPage() {
           }`}
         >
           <Flag className="w-4 h-4" />
-          Reports
+          Reports ({reports.length})
         </button>
 
         <button
@@ -533,7 +492,7 @@ export default function AdminPanelPage() {
           }`}
         >
           <LifeBuoy className="w-4 h-4" />
-          Support Tickets
+          Support Tickets ({tickets.length})
         </button>
       </div>
 
@@ -569,7 +528,6 @@ export default function AdminPanelPage() {
                       <div className="space-y-0.5">
                         <div className="font-extrabold text-slate-800 text-sm flex items-center gap-2 flex-wrap">
                           <span>{u.preferred_name}</span>
-                          {/* Role Badge explicitly next to name */}
                           <span className={`px-2 py-0.5 rounded font-extrabold text-[10px] uppercase tracking-wider ${
                             u.role === 'FOUNDER'
                               ? 'bg-purple-200 text-purple-900 border border-purple-300'
@@ -628,7 +586,7 @@ export default function AdminPanelPage() {
                                 </span>
                                 <span className="font-bold text-slate-800 text-xs">{c.reason}</span>
                               </div>
-                              <p className="text-slate-500 text-[11px]">Issued by: {c.issuer_name} | {new Date(c.created_at).toLocaleDateString()}</p>
+                              <p className="text-slate-500 text-[11px]">Issued: {new Date(c.created_at).toLocaleDateString()}</p>
                             </div>
 
                             <button
@@ -878,7 +836,7 @@ export default function AdminPanelPage() {
               <div key={r.id} className="p-4 bg-purple-50/40 rounded-2xl border border-purple-100 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-slate-800">{r.preferred_name} (@{r.roblox_username})</span>
+                    <span className="font-bold text-slate-800">{r.preferred_name || 'Staff Member'} (@{r.roblox_username || 'Staff'})</span>
                     <span className="px-2 py-0.5 bg-purple-100 text-purple-800 border border-purple-200 font-extrabold rounded">{r.type}</span>
                     <span className="text-slate-500 font-medium">{r.start_date} to {r.end_date}</span>
                   </div>
@@ -912,59 +870,7 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 5: QUOTA NON-COMPLIANCE ONLY */}
-      {activeTab === 'ROSTER' && (
-        <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
-          <div className="border-b border-slate-100 pb-3">
-            <h3 className="text-lg font-bold text-slate-800">Weekly Quota Deficit List (BST)</h3>
-            <p className="text-xs text-slate-500">
-              Only displays active staff who have <strong>NOT</strong> completed their 3-flight quota by Sunday midnight BST. Compliant and LOA staff are automatically filtered out.
-            </p>
-          </div>
-
-          {nonCompliantRoster.length === 0 ? (
-            <div className="text-center py-10 text-slate-400">
-              <CheckCircle2 className="w-10 h-10 mx-auto text-emerald-500 mb-2 opacity-60" />
-              <p className="text-sm font-semibold text-slate-800">100% Quota Compliance</p>
-              <p className="text-xs text-slate-500 mt-1">All active staff have completed their required weekly quota!</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {nonCompliantRoster.map((item) => {
-                const u = item.user;
-                const q = item.quota;
-                return (
-                  <div key={u.id} className="p-4 bg-rose-50/50 rounded-2xl border border-rose-200 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-800 text-sm">{u.preferred_name}</span>
-                        <span className="text-slate-500">(@{u.roblox_username})</span>
-                        <span className="px-2 py-0.5 bg-rose-100 text-rose-800 font-extrabold rounded text-[10px]">
-                          NON-COMPLIANT
-                        </span>
-                      </div>
-                      <p className="text-slate-600">
-                        Flights Completed: <strong className="text-rose-700">{q.completedThisWeek} / {q.requiredQuota}</strong>
-                      </p>
-                    </div>
-
-                    <div>
-                      <button
-                        onClick={() => handleIssueRosterInfraction(u.id)}
-                        className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md text-xs"
-                      >
-                        Issue Quota Infraction
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TAB 6: CONSEQUENCES & SUSPENSION DURATION */}
+      {/* TAB 5: CONSEQUENCES & SUSPENSION DURATION */}
       {activeTab === 'CONSEQUENCES' && (
         <div className="space-y-6">
           <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
@@ -976,7 +882,7 @@ export default function AdminPanelPage() {
                   required
                   value={consUserId}
                   onChange={(e) => setConsUserId(Number(e.target.value))}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
                 >
                   <option value="">Select staff member...</option>
                   {activeStaff.map((s) => (
@@ -990,7 +896,7 @@ export default function AdminPanelPage() {
                 <select
                   value={consType}
                   onChange={(e: any) => setConsType(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
                 >
                   <option value="INFORMAL_SANCTION">Informal Sanction</option>
                   <option value="INFRACTION">Formal Infraction</option>
@@ -1008,7 +914,7 @@ export default function AdminPanelPage() {
                     value={consDays}
                     onChange={(e) => setConsDays(e.target.value)}
                     placeholder="e.g. 7"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
                   />
                 </div>
               ) : (
@@ -1020,7 +926,7 @@ export default function AdminPanelPage() {
                     value={consReason}
                     onChange={(e) => setConsReason(e.target.value)}
                     placeholder="e.g. Unprofessional demeanor / Missed quota"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
                   />
                 </div>
               )}
@@ -1034,7 +940,7 @@ export default function AdminPanelPage() {
                     value={consReason}
                     onChange={(e) => setConsReason(e.target.value)}
                     placeholder="e.g. Repeated quota non-compliance"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
                   />
                 </div>
               )}
@@ -1060,7 +966,7 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 7: MAINTENANCE MODE & FORTNITE WARNING BANNERS */}
+      {/* TAB 6: MAINTENANCE MODE & FORTNITE WARNING BANNERS */}
       {activeTab === 'MAINTENANCE_ALERTS' && (
         <div className="space-y-6">
           <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
@@ -1121,7 +1027,7 @@ export default function AdminPanelPage() {
                   <select
                     value={alertSeverity}
                     onChange={(e: any) => setAlertSeverity(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
                   >
                     <option value="WARNING">Warning (Yellow Banner)</option>
                     <option value="SEVERE">Severe Warning (Red Banner)</option>
@@ -1137,7 +1043,7 @@ export default function AdminPanelPage() {
                     value={alertTitle}
                     onChange={(e) => setAlertTitle(e.target.value)}
                     placeholder="e.g. V8.10 PING ISSUE"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold uppercase"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 uppercase"
                   />
                 </div>
 
@@ -1167,7 +1073,7 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 8: ANNOUNCEMENTS */}
+      {/* TAB 7: ANNOUNCEMENTS */}
       {activeTab === 'ANNOUNCEMENTS' && (
         <div className="space-y-6">
           <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
@@ -1181,7 +1087,7 @@ export default function AdminPanelPage() {
                   value={annTitle}
                   onChange={(e) => setAnnTitle(e.target.value)}
                   placeholder="Title..."
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
                 />
               </div>
               <div>
@@ -1230,7 +1136,7 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 9: REPORTS */}
+      {/* TAB 8: REPORTS */}
       {activeTab === 'REPORTS' && (
         <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
           <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-3">User & Bug Reports Desk</h3>
@@ -1242,7 +1148,7 @@ export default function AdminPanelPage() {
                     <span className="px-2.5 py-0.5 bg-purple-100 text-purple-800 font-extrabold rounded">
                       {r.type} REPORT
                     </span>
-                    <span className="text-slate-500">Reporter: {r.reporter_name}</span>
+                    <span className="text-slate-500">Reporter: {r.reporter_name || 'Staff'}</span>
                     {r.target_username && (
                       <span className="font-bold text-rose-800 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded">
                         Target: @{r.target_username}

@@ -5,11 +5,13 @@ import { Plane, Calendar, UserCheck, HelpCircle, UserX, Clock, ChevronDown, Chev
 import { formatDateLocal } from '@/lib/utils';
 import { database } from '@/lib/firebase';
 import { ref, onValue } from 'firebase/database';
+import { parseFirebaseSnapshot } from '@/lib/realtime-sync';
 
 export default function AllocationsPage() {
   const [user, setUser] = useState<any>(null);
-  const [flights, setFlights] = useState<any[]>([]);
-  const [activeStaff, setActiveStaff] = useState<any[]>([]);
+  const [rawFlights, setRawFlights] = useState<any[]>([]);
+  const [rawAllocations, setRawAllocations] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedFlightId, setExpandedFlightId] = useState<number | null>(null);
 
@@ -19,69 +21,64 @@ export default function AllocationsPage() {
   const [registerSubmitting, setRegisterSubmitting] = useState(false);
   const [registerMsg, setRegisterMsg] = useState<string | null>(null);
 
-  const fetchUserAndStaff = async () => {
-    try {
-      const meRes = await fetch('/api/auth/me');
-      const meData = await meRes.json();
-      if (meData.user) setUser(meData.user);
-
-      if (meData.user && (meData.user.role === 'ADMIN' || meData.user.role === 'FOUNDER')) {
-        const usersRes = await fetch('/api/admin/users');
-        const usersData = await usersRes.json();
-        if (usersData.users) {
-          setActiveStaff(usersData.users.filter((u: any) => u.status === 'ACTIVE'));
-        }
-      }
-    } catch (err) {
-      console.error('Error fetching user data:', err);
-    }
-  };
-
   useEffect(() => {
-    fetchUserAndStaff();
+    // 1. Get current logged in user
+    fetch(`/api/auth/me?t=${Date.now()}`, { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.user) setUser(data.user);
+      });
 
-    // Live Firebase WebSocket Listener for Flights & Allocations
-    const flightsRef = ref(database, 'flights');
-    const unsubFlights = onValue(flightsRef, async () => {
-      try {
-        const res = await fetch(`/api/flights?t=${Date.now()}`, { cache: 'no-store' });
-        const data = await res.json();
-        if (data.flights) setFlights(data.flights);
-      } catch (err) {
-        console.error('Error refreshing flights:', err);
-      } finally {
-        setLoading(false);
-      }
+    // 2. Direct Firebase Realtime WebSockets Listener for Flights
+    const unsubFlights = onValue(ref(database, 'flights'), (snapshot) => {
+      setRawFlights(parseFirebaseSnapshot(snapshot));
+      setLoading(false);
     });
 
-    const allocRef = ref(database, 'allocations');
-    const unsubAlloc = onValue(allocRef, async () => {
-      try {
-        const res = await fetch(`/api/flights?t=${Date.now()}`, { cache: 'no-store' });
-        const data = await res.json();
-        if (data.flights) setFlights(data.flights);
-      } catch (err) {
-        console.error('Error refreshing allocations:', err);
-      }
+    // 3. Direct Firebase Realtime WebSockets Listener for Allocations
+    const unsubAlloc = onValue(ref(database, 'allocations'), (snapshot) => {
+      const val = snapshot.val();
+      setRawAllocations(val ? Object.values(val).filter(Boolean) : []);
+    });
+
+    // 4. Direct Firebase Realtime WebSockets Listener for Users
+    const unsubUsers = onValue(ref(database, 'users'), (snapshot) => {
+      setUsers(parseFirebaseSnapshot(snapshot));
     });
 
     return () => {
       unsubFlights();
       unsubAlloc();
+      unsubUsers();
     };
   }, []);
 
-  const handleAllocation = async (flightId: number, status: 'ATTENDING' | 'UNSURE' | 'ABSENT') => {
-    // Immediate Optimistic Update
-    setFlights((prevFlights) =>
-      prevFlights.map((f) => {
-        if (f.id === flightId) {
-          return { ...f, my_status: status };
-        }
-        return f;
-      })
-    );
+  const activeStaff = users.filter((u) => u.status === 'ACTIVE');
 
+  // Compute enriched flights in real-time from snapshot data
+  const flights = rawFlights.map((flight) => {
+    const flightAllocations = rawAllocations.filter((a: any) => Number(a.flight_id) === Number(flight.id));
+
+    const enrichedAllocations = flightAllocations.map((alloc: any) => {
+      const u = users.find((usr: any) => Number(usr.id) === Number(alloc.user_id));
+      return {
+        ...alloc,
+        preferred_name: u?.preferred_name || 'Staff Member',
+        roblox_username: u?.roblox_username || 'Unknown',
+        role: u?.role || 'STAFF'
+      };
+    });
+
+    const myAlloc = flightAllocations.find((a: any) => Number(a.user_id) === Number(user?.id));
+
+    return {
+      ...flight,
+      my_status: myAlloc ? myAlloc.status : 'UNALLOCATED',
+      allocations: enrichedAllocations
+    };
+  });
+
+  const handleAllocation = async (flightId: number, status: 'ATTENDING' | 'UNSURE' | 'ABSENT') => {
     try {
       await fetch('/api/allocations', {
         method: 'POST',
@@ -145,7 +142,7 @@ export default function AllocationsPage() {
       <div>
         <h1 className="text-3xl font-black text-slate-800 tracking-tight">Weekly Allocations</h1>
         <p className="text-slate-500 font-medium text-sm mt-0.5">
-          View upcoming flight schedules and allocate your availability in real time.
+          View upcoming flight schedules and allocate your availability in real time. Updates automatically across all devices instantly.
         </p>
       </div>
 
