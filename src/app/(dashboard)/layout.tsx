@@ -14,7 +14,12 @@ import {
   ShieldCheck, 
   LogOut, 
   Bell, 
-  Plane
+  Plane,
+  ShieldAlert,
+  Wrench,
+  CheckCircle2,
+  AlertOctagon,
+  XCircle
 } from 'lucide-react';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -28,23 +33,37 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
 
+  // System states
+  const [suspension, setSuspension] = useState<any>(null);
+  const [maintenance, setMaintenance] = useState<{ active: boolean; message: string }>({ active: false, message: '' });
+  const [systemAlert, setSystemAlert] = useState<any>(null);
+
   useEffect(() => {
     fetch('/api/auth/me')
-      .then((res) => {
-        if (!res.ok) {
-          router.push('/login');
-          return null;
-        }
-        return res.json();
-      })
+      .then((res) => res.json())
       .then((data) => {
-        if (data && data.user) {
+        if (data.suspended) {
+          setSuspension(data.suspension);
           setUser(data.user);
+        } else if (data.user) {
+          setUser(data.user);
+        } else {
+          router.push('/login');
         }
         setLoading(false);
       })
       .catch(() => {
         router.push('/login');
+      });
+
+    // Check system alerts & maintenance mode
+    fetch('/api/system-alerts')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data) {
+          setMaintenance({ active: data.maintenance_mode, message: data.maintenance_message });
+          setSystemAlert(data.alert);
+        }
       });
   }, []);
 
@@ -61,12 +80,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   };
 
   useEffect(() => {
-    if (user) {
+    if (user && !suspension) {
       fetchNotifications();
       const interval = setInterval(fetchNotifications, 15000);
       return () => clearInterval(interval);
     }
-  }, [user]);
+  }, [user, suspension]);
 
   useEffect(() => {
     const updateTime = () => {
@@ -101,6 +120,69 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="flex flex-col items-center gap-3">
           <div className="w-12 h-12 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
           <p className="text-purple-900 font-bold text-sm">Loading Luma Staff Portal...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // SUSPENSION LOCKOUT SCREEN
+  if (suspension && user?.role !== 'FOUNDER') {
+    return (
+      <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-slate-800 rounded-3xl p-8 shadow-2xl border border-rose-800 text-center space-y-4">
+          <div className="w-16 h-16 bg-rose-950/80 border border-rose-700 rounded-2xl flex items-center justify-center mx-auto text-rose-400 shadow-lg">
+            <ShieldAlert className="w-10 h-10" />
+          </div>
+
+          <h2 className="text-2xl font-black text-rose-400 tracking-tight">Account Suspended</h2>
+
+          <div className="space-y-2 bg-slate-900/80 p-4 rounded-2xl border border-slate-700 text-xs text-slate-300">
+            <p className="font-semibold text-slate-100">Reason: {suspension.reason}</p>
+            <p>Access Restored: <strong className="text-amber-400">{suspension.expires_at ? new Date(suspension.expires_at).toLocaleString() : 'Indefinite'}</strong></p>
+            {suspension.notes && <p className="text-slate-400 italic">Notes: {suspension.notes}</p>}
+          </div>
+
+          <p className="text-xs text-slate-400">
+            You cannot access the staff portal during your suspension period. If you believe this is an error, contact Executive Management on Discord.
+          </p>
+
+          <button
+            onClick={handleLogout}
+            className="w-full py-3 bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold text-xs rounded-xl transition-all"
+          >
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // WEBSITE MAINTENANCE MODE SCREEN (Non-Admin / Non-Founder)
+  if (maintenance.active && user?.role !== 'ADMIN' && user?.role !== 'FOUNDER') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-900 via-indigo-950 to-purple-950 text-white flex items-center justify-center p-4">
+        <div className="max-w-lg w-full bg-white/10 backdrop-blur-xl rounded-3xl p-8 shadow-2xl border border-white/20 text-center space-y-5">
+          <div className="w-20 h-20 bg-purple-600/30 rounded-3xl flex items-center justify-center mx-auto text-purple-300 border border-purple-400/40 shadow-xl">
+            <Wrench className="w-10 h-10 animate-bounce" />
+          </div>
+
+          <div>
+            <h2 className="text-3xl font-black tracking-tight text-white">System Under Maintenance</h2>
+            <p className="text-purple-200 text-xs font-semibold mt-1">LUMA AIRWAYS eCREW PORTAL</p>
+          </div>
+
+          <p className="text-sm text-purple-100/90 leading-relaxed bg-white/5 p-4 rounded-2xl border border-white/10">
+            {maintenance.message}
+          </p>
+
+          <div className="pt-2">
+            <button
+              onClick={handleLogout}
+              className="px-6 py-3 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl transition-all border border-white/20"
+            >
+              Sign Out
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -248,6 +330,55 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           </div>
         </header>
+
+        {/* FORTNITE-STYLE SYSTEM WARNING BANNER (Matching uploaded screenshot) */}
+        {systemAlert && systemAlert.is_active === 1 && (
+          <div className="mx-8 mt-6">
+            <div className={`rounded-xl shadow-xl overflow-hidden flex border text-white ${
+              systemAlert.severity === 'SEVERE'
+                ? 'bg-rose-950 border-rose-600'
+                : systemAlert.severity === 'RESOLVED'
+                ? 'bg-emerald-950 border-emerald-600'
+                : 'bg-[#1b2b4e] border-yellow-400/80'
+            }`}>
+              {/* Left Large Icon Block */}
+              <div className={`w-20 md:w-24 shrink-0 flex items-center justify-center border-r p-3 ${
+                systemAlert.severity === 'SEVERE'
+                  ? 'bg-rose-600 text-white border-rose-500'
+                  : systemAlert.severity === 'RESOLVED'
+                  ? 'bg-emerald-600 text-white border-emerald-500'
+                  : 'bg-yellow-400 text-slate-950 border-yellow-500'
+              }`}>
+                {systemAlert.severity === 'SEVERE' ? (
+                  <AlertOctagon className="w-12 h-12" />
+                ) : systemAlert.severity === 'RESOLVED' ? (
+                  <CheckCircle2 className="w-12 h-12" />
+                ) : (
+                  <AlertTriangle className="w-12 h-12 stroke-[2.5]" />
+                )}
+              </div>
+
+              {/* Banner Right Text Container */}
+              <div className="p-4 flex-1 flex flex-col justify-center space-y-1">
+                {/* Yellow Header Pill Bar */}
+                <div className="inline-block self-start px-2.5 py-0.5 font-black text-xs uppercase tracking-wider rounded-sm shadow-sm ${
+                  systemAlert.severity === 'SEVERE'
+                    ? 'bg-rose-500 text-white'
+                    : systemAlert.severity === 'RESOLVED'
+                    ? 'bg-emerald-500 text-white'
+                    : 'bg-yellow-300 text-slate-950'
+                }">
+                  {systemAlert.title}
+                </div>
+
+                {/* Banner Message Body */}
+                <p className="text-xs font-semibold leading-snug tracking-wide opacity-95">
+                  {systemAlert.message}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <main className="flex-1 p-8">
           {children}

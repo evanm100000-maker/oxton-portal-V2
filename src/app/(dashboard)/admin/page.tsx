@@ -21,12 +21,15 @@ import {
   Bug,
   HelpCircle,
   Sparkles,
-  ClipboardCheck
+  ClipboardCheck,
+  Wrench,
+  AlertOctagon,
+  Power
 } from 'lucide-react';
 
 export default function AdminPanelPage() {
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'SIGNUPS' | 'FLIGHTS' | 'LOA' | 'ROSTER' | 'CONSEQUENCES' | 'TICKETS' | 'REPORTS' | 'ANNOUNCEMENTS' | 'ADMIN_TEAM'>('SIGNUPS');
+  const [activeTab, setActiveTab] = useState<'SIGNUPS' | 'FLIGHTS' | 'LOA' | 'ROSTER' | 'CONSEQUENCES' | 'TICKETS' | 'REPORTS' | 'ANNOUNCEMENTS' | 'STAFF_ADMINS' | 'MAINTENANCE_ALERTS'>('SIGNUPS');
 
   const [users, setUsers] = useState<any[]>([]);
   const [flights, setFlights] = useState<any[]>([]);
@@ -36,6 +39,14 @@ export default function AdminPanelPage() {
   const [reports, setReports] = useState<any[]>([]);
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Maintenance & System Alert State
+  const [maintEnabled, setMaintEnabled] = useState(false);
+  const [maintMessage, setMaintMessage] = useState('Luma Airways portal is currently under scheduled maintenance.');
+  const [alertTitle, setAlertTitle] = useState('V8.10 SERVICE ISSUE');
+  const [alertMessage, setAlertMessage] = useState('Some staff members may experience latency. We are investigating.');
+  const [alertSeverity, setAlertSeverity] = useState<'WARNING' | 'SEVERE' | 'RESOLVED'>('WARNING');
+  const [currentAlert, setCurrentAlert] = useState<any>(null);
 
   // Form states
   const [flightCode, setFlightCode] = useState('');
@@ -47,10 +58,12 @@ export default function AdminPanelPage() {
   const [selectedFlight, setSelectedFlight] = useState<any>(null);
   const [attendanceMap, setAttendanceMap] = useState<Record<number, 'PRESENT' | 'LATE' | 'ABSENT'>>({});
 
+  // Consequence state
   const [consUserId, setConsUserId] = useState<number | ''>('');
   const [consType, setConsType] = useState<'INFORMAL_SANCTION' | 'INFRACTION' | 'SUSPENSION'>('INFORMAL_SANCTION');
   const [consReason, setConsReason] = useState('');
   const [consNotes, setConsNotes] = useState('');
+  const [consDays, setConsDays] = useState('7');
 
   const [annTitle, setAnnTitle] = useState('');
   const [annContent, setAnnContent] = useState('');
@@ -93,6 +106,14 @@ export default function AdminPanelPage() {
       const annRes = await fetch('/api/announcements');
       const annData = await annRes.json();
       if (annData.announcements) setAnnouncements(annData.announcements);
+
+      const alertsRes = await fetch('/api/system-alerts');
+      const alertsData = await alertsRes.json();
+      if (alertsData) {
+        setMaintEnabled(alertsData.maintenance_mode);
+        if (alertsData.maintenance_message) setMaintMessage(alertsData.maintenance_message);
+        if (alertsData.alert) setCurrentAlert(alertsData.alert);
+      }
     } catch (err) {
       console.error('Admin data fetch error:', err);
     } finally {
@@ -216,6 +237,15 @@ export default function AdminPanelPage() {
   const handleIssueConsequence = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!consUserId) return;
+
+    let expiresAt: string | null = null;
+    if (consType === 'SUSPENSION' && consDays) {
+      const days = parseInt(consDays);
+      const exp = new Date();
+      exp.setDate(exp.getDate() + days);
+      expiresAt = exp.toISOString();
+    }
+
     const res = await fetch('/api/consequences', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -224,10 +254,11 @@ export default function AdminPanelPage() {
         type: consType,
         reason: consReason,
         notes: consNotes,
+        expires_at: expiresAt,
       }),
     });
     if (res.ok) {
-      setFeedback('Consequence successfully issued to staff member.');
+      setFeedback('Consequence successfully issued.');
       setConsReason('');
       setConsNotes('');
       setConsUserId('');
@@ -250,8 +281,62 @@ export default function AdminPanelPage() {
     }
   };
 
+  const handleToggleMaintenance = async () => {
+    const nextState = !maintEnabled;
+    const res = await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'toggle_maintenance',
+        enabled: nextState,
+        message: maintMessage,
+      }),
+    });
+    if (res.ok) {
+      setMaintEnabled(nextState);
+      setFeedback(`Website Maintenance Mode turned ${nextState ? 'ON (Locked)' : 'OFF (Open)'}.`);
+      fetchAllAdminData();
+    }
+  };
+
+  const handleCreateSystemAlert = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'create_alert',
+        title: alertTitle,
+        message: alertMessage,
+        severity: alertSeverity,
+      }),
+    });
+    if (res.ok) {
+      setFeedback(`System Warning Banner published (${alertSeverity})!`);
+      fetchAllAdminData();
+    }
+  };
+
+  const handleResolveAlert = async () => {
+    const res = await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'resolve_alert',
+        alert_id: currentAlert?.id,
+      }),
+    });
+    if (res.ok) {
+      setFeedback('System Warning Banner resolved/cleared.');
+      fetchAllAdminData();
+    }
+  };
+
   const pendingSignups = users.filter((u) => u.status === 'PENDING');
   const activeStaff = users.filter((u) => u.status === 'ACTIVE');
+
+  // QUOTA NON-COMPLIANT LIST ONLY (Only staff who haven't completed quota by Sunday midnight BST)
+  const nonCompliantRoster = roster.filter((item) => !item.isCompliant && item.quota.statusBadge === 'ACTIVE');
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -269,7 +354,7 @@ export default function AdminPanelPage() {
               <div>
                 <h1 className="text-2xl font-black tracking-tight">Executive Admin Portal</h1>
                 <p className="text-purple-100 text-xs font-medium mt-0.5">
-                  High-Rank operations, signups, flight registers, LOAs, and quota compliance.
+                  High-Rank operations, signups, flight registers, LOAs, staff management, and system alerts.
                 </p>
               </div>
             </div>
@@ -311,6 +396,16 @@ export default function AdminPanelPage() {
         </button>
 
         <button
+          onClick={() => setActiveTab('STAFF_ADMINS')}
+          className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 ${
+            activeTab === 'STAFF_ADMINS' ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-purple-50'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          Staff Directory & Admins
+        </button>
+
+        <button
           onClick={() => setActiveTab('FLIGHTS')}
           className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 ${
             activeTab === 'FLIGHTS' ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-purple-50'
@@ -337,7 +432,7 @@ export default function AdminPanelPage() {
           }`}
         >
           <Users className="w-4 h-4" />
-          Quota Compliance
+          Quota Deficit ({nonCompliantRoster.length})
         </button>
 
         <button
@@ -351,13 +446,13 @@ export default function AdminPanelPage() {
         </button>
 
         <button
-          onClick={() => setActiveTab('TICKETS')}
+          onClick={() => setActiveTab('MAINTENANCE_ALERTS')}
           className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 ${
-            activeTab === 'TICKETS' ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-purple-50'
+            activeTab === 'MAINTENANCE_ALERTS' ? 'bg-gradient-to-r from-rose-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-purple-50'
           }`}
         >
-          <LifeBuoy className="w-4 h-4" />
-          Support Tickets
+          <Wrench className="w-4 h-4" />
+          Maintenance & Warning Banners
         </button>
 
         <button
@@ -367,27 +462,17 @@ export default function AdminPanelPage() {
           }`}
         >
           <Flag className="w-4 h-4" />
-          User & Bug Reports
+          Reports
         </button>
 
         <button
-          onClick={() => setActiveTab('ANNOUNCEMENTS')}
+          onClick={() => setActiveTab('TICKETS')}
           className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 ${
-            activeTab === 'ANNOUNCEMENTS' ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-purple-50'
+            activeTab === 'TICKETS' ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-purple-50'
           }`}
         >
-          <Megaphone className="w-4 h-4" />
-          Announcements
-        </button>
-
-        <button
-          onClick={() => setActiveTab('ADMIN_TEAM')}
-          className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 ${
-            activeTab === 'ADMIN_TEAM' ? 'bg-purple-700 text-white shadow-md' : 'text-purple-700 hover:bg-purple-50'
-          }`}
-        >
-          <Crown className="w-4 h-4 text-amber-400" />
-          Admin Team (Founder)
+          <LifeBuoy className="w-4 h-4" />
+          Support Tickets
         </button>
       </div>
 
@@ -427,7 +512,59 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 2: FLIGHT SCHEDULES & REGISTER */}
+      {/* TAB 2: ALL STAFF & ADMIN MANAGEMENT */}
+      {activeTab === 'STAFF_ADMINS' && (
+        <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
+          <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <Users className="w-5 h-5 text-purple-600" /> Staff Directory & Admin Management
+              </h3>
+              <p className="text-xs text-slate-500">Manage staff account roles. Admins and Founder can promote or demote admin team members.</p>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {activeStaff.map((u) => (
+              <div key={u.id} className="p-4 bg-purple-50/40 rounded-2xl border border-purple-100 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                <div className="space-y-0.5">
+                  <div className="font-extrabold text-slate-800 text-sm flex items-center gap-2">
+                    {u.preferred_name} (@{u.roblox_username})
+                    <span className={`px-2 py-0.5 rounded font-bold text-[10px] ${
+                      u.role === 'FOUNDER' ? 'bg-purple-200 text-purple-900' : u.role === 'ADMIN' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {u.role}
+                    </span>
+                  </div>
+                  <div className="text-slate-500">Email: {u.email} | Discord: {u.discord_username}</div>
+                </div>
+
+                {u.role !== 'FOUNDER' && (
+                  <div>
+                    {u.role === 'ADMIN' ? (
+                      <button
+                        onClick={() => handleUpdateRole(u.id, 'STAFF')}
+                        className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md text-xs"
+                      >
+                        Remove from Admin Team
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleUpdateRole(u.id, 'ADMIN')}
+                        className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white font-bold rounded-xl shadow-md text-xs"
+                      >
+                        Promote to Admin Team
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: FLIGHT SCHEDULES & REGISTER */}
       {activeTab === 'FLIGHTS' && (
         <div className="space-y-6">
           <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
@@ -442,7 +579,7 @@ export default function AdminPanelPage() {
                   required
                   value={flightCode}
                   onChange={(e) => setFlightCode(e.target.value)}
-                  placeholder="e.g. OX-204"
+                  placeholder="e.g. LM-204"
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
                 />
               </div>
@@ -519,7 +656,7 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* REGISTER MODAL (PRESENT, LATE, ABSENT) */}
+      {/* REGISTER MODAL */}
       {selectedFlight && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 max-w-xl w-full shadow-2xl border border-purple-100 space-y-4 text-slate-800">
@@ -598,7 +735,7 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 3: LOA REQUESTS */}
+      {/* TAB 4: LOA REQUESTS */}
       {activeTab === 'LOA' && (
         <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
           <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-3">LOA & Reduced Activity Applications</h3>
@@ -641,63 +778,59 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 4: ROSTER COMPLIANCE */}
+      {/* TAB 5: QUOTA NON-COMPLIANCE ONLY (Only shows names if they haven't completed quota by Sunday midnight BST) */}
       {activeTab === 'ROSTER' && (
         <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
           <div className="border-b border-slate-100 pb-3">
-            <h3 className="text-lg font-bold text-slate-800">Weekly Quota Compliance Tracker</h3>
+            <h3 className="text-lg font-bold text-slate-800">Weekly Quota Deficit List (BST)</h3>
             <p className="text-xs text-slate-500">
-              Staff on active LOA or Reduced Activity are automatically excluded from non-compliance infraction penalty lists.
+              Only displays active staff who have <strong>NOT</strong> completed their 3-flight quota by Sunday midnight BST. Compliant and LOA staff are automatically filtered out.
             </p>
           </div>
 
-          <div className="space-y-3">
-            {roster.map((item) => {
-              const u = item.user;
-              const q = item.quota;
-              return (
-                <div key={u.id} className="p-4 bg-purple-50/40 rounded-2xl border border-purple-100 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-800 text-sm">{u.preferred_name}</span>
-                      <span className="text-slate-500">(@{u.roblox_username})</span>
-                      <span className={`px-2 py-0.5 font-bold rounded text-[10px] ${
-                        q.statusBadge === 'LOA' ? 'bg-purple-100 text-purple-800 border border-purple-200' : q.statusBadge === 'REDUCED_ACTIVITY' ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' : 'bg-slate-100 text-slate-600'
-                      }`}>
-                        {q.statusBadge}
-                      </span>
+          {nonCompliantRoster.length === 0 ? (
+            <div className="text-center py-10 text-slate-400">
+              <CheckCircle2 className="w-10 h-10 mx-auto text-emerald-500 mb-2 opacity-60" />
+              <p className="text-sm font-semibold text-slate-800">100% Quota Compliance</p>
+              <p className="text-xs text-slate-500 mt-1">All active staff have completed their required weekly quota!</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {nonCompliantRoster.map((item) => {
+                const u = item.user;
+                const q = item.quota;
+                return (
+                  <div key={u.id} className="p-4 bg-rose-50/50 rounded-2xl border border-rose-200 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-800 text-sm">{u.preferred_name}</span>
+                        <span className="text-slate-500">(@{u.roblox_username})</span>
+                        <span className="px-2 py-0.5 bg-rose-100 text-rose-800 font-extrabold rounded text-[10px]">
+                          NON-COMPLIANT
+                        </span>
+                      </div>
+                      <p className="text-slate-600">
+                        Flights Completed: <strong className="text-rose-700">{q.completedThisWeek} / {q.requiredQuota}</strong>
+                      </p>
                     </div>
-                    <p className="text-slate-600">
-                      Flights Completed: <strong className="text-slate-800">{q.completedThisWeek} / {q.requiredQuota}</strong>
-                    </p>
-                  </div>
 
-                  <div>
-                    {item.isCompliant ? (
-                      <span className="px-3.5 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold rounded-full text-xs">
-                        ✓ Compliant
-                      </span>
-                    ) : q.statusBadge !== 'ACTIVE' ? (
-                      <span className="px-3.5 py-1.5 bg-purple-100 text-purple-800 border border-purple-200 font-bold rounded-full text-xs">
-                        Exempt ({q.statusBadge})
-                      </span>
-                    ) : (
+                    <div>
                       <button
                         onClick={() => handleIssueRosterInfraction(u.id)}
                         className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md text-xs"
                       >
                         Issue Quota Infraction
                       </button>
-                    )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
-      {/* TAB 5: CONSEQUENCES */}
+      {/* TAB 6: CONSEQUENCES & SUSPENSION DURATION */}
       {activeTab === 'CONSEQUENCES' && (
         <div className="space-y-6">
           <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
@@ -731,17 +864,46 @@ export default function AdminPanelPage() {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Reason</label>
-                <input
-                  type="text"
-                  required
-                  value={consReason}
-                  onChange={(e) => setConsReason(e.target.value)}
-                  placeholder="e.g. Unprofessional demeanor / Missed quota"
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
-                />
-              </div>
+              {consType === 'SUSPENSION' ? (
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Suspension Duration (Days)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="365"
+                    value={consDays}
+                    onChange={(e) => setConsDays(e.target.value)}
+                    placeholder="e.g. 7"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Reason</label>
+                  <input
+                    type="text"
+                    required
+                    value={consReason}
+                    onChange={(e) => setConsReason(e.target.value)}
+                    placeholder="e.g. Unprofessional demeanor / Missed quota"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  />
+                </div>
+              )}
+
+              {consType === 'SUSPENSION' && (
+                <div className="md:col-span-3">
+                  <label className="block text-slate-700 font-bold mb-1">Suspension Reason</label>
+                  <input
+                    type="text"
+                    required
+                    value={consReason}
+                    onChange={(e) => setConsReason(e.target.value)}
+                    placeholder="e.g. Repeated quota non-compliance"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  />
+                </div>
+              )}
 
               <div className="md:col-span-3">
                 <label className="block text-slate-700 font-bold mb-1">Additional Notes (Optional)</label>
@@ -764,93 +926,141 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 8: ANNOUNCEMENTS */}
-      {activeTab === 'ANNOUNCEMENTS' && (
-        <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
-          <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-3">Post Announcement</h3>
-          <form onSubmit={handleCreateAnnouncement} className="space-y-4 text-xs font-medium">
-            <div>
-              <label className="block text-slate-700 font-bold mb-1">Announcement Title</label>
-              <input
-                type="text"
-                required
-                value={annTitle}
-                onChange={(e) => setAnnTitle(e.target.value)}
-                placeholder="Title..."
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-700 font-bold mb-1">Content</label>
-              <textarea
-                required
-                rows={5}
-                value={annContent}
-                onChange={(e) => setAnnContent(e.target.value)}
-                placeholder="Write your announcement..."
-                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-800"
-              ></textarea>
-            </div>
-            <div className="flex justify-end">
-              <button type="submit" className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold rounded-xl shadow-md">
-                Publish Announcement
+      {/* TAB 7: MAINTENANCE MODE & FORTNITE WARNING BANNERS */}
+      {activeTab === 'MAINTENANCE_ALERTS' && (
+        <div className="space-y-6">
+          {/* Maintenance Lockout Manager */}
+          <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <Wrench className="w-5 h-5 text-purple-600" /> Website Maintenance Mode
+                </h3>
+                <p className="text-xs text-slate-500">Lock non-admin staff out of the website during maintenance windows.</p>
+              </div>
+
+              <button
+                onClick={handleToggleMaintenance}
+                className={`px-5 py-2.5 font-bold rounded-xl text-xs flex items-center gap-2 shadow-md transition-all ${
+                  maintEnabled ? 'bg-rose-600 hover:bg-rose-700 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                }`}
+              >
+                <Power className="w-4 h-4" />
+                {maintEnabled ? 'Turn Maintenance OFF' : 'Turn Maintenance ON'}
               </button>
             </div>
-          </form>
-        </div>
-      )}
 
-      {/* TAB 9: ADMIN TEAM (FOUNDER ONLY) */}
-      {activeTab === 'ADMIN_TEAM' && (
-        <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
-          <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
             <div>
-              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                <Crown className="w-5 h-5 text-amber-500" /> Admin Team Permissions (Founder Control)
-              </h3>
-              <p className="text-xs text-slate-500">Only the Founder can add or remove users from the Admin team.</p>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Maintenance Message Displayed to Staff</label>
+              <input
+                type="text"
+                value={maintMessage}
+                onChange={(e) => setMaintMessage(e.target.value)}
+                placeholder="Write maintenance reason..."
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-medium"
+              />
             </div>
           </div>
 
-          {currentUser?.role !== 'FOUNDER' ? (
-            <div className="p-8 bg-amber-50 border border-amber-200 rounded-2xl text-center text-amber-900 font-bold text-sm">
-              🚫 Access Restricted: Only the Founder can modify Admin team permissions.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {users.map((u) => (
-                <div key={u.id} className="p-4 bg-purple-50/40 rounded-2xl border border-purple-100 flex items-center justify-between text-xs">
-                  <div>
-                    <div className="font-extrabold text-slate-800 text-sm flex items-center gap-2">
-                      {u.preferred_name} (@{u.roblox_username})
-                      {u.role === 'FOUNDER' && <span className="px-2 py-0.5 bg-purple-200 text-purple-900 font-black rounded text-[10px]">FOUNDER</span>}
-                    </div>
-                    <div className="text-slate-500">{u.email} | Current Role: <strong className="text-slate-800">{u.role}</strong></div>
-                  </div>
+          {/* Fortnite Style Warning Banner Publisher */}
+          <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
+            <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-amber-500" /> System Warning Banner (Fortnite Style)
+                </h3>
+                <p className="text-xs text-slate-500">Publish active warning banners across the top of the portal for all users.</p>
+              </div>
 
-                  {u.role !== 'FOUNDER' && (
-                    <div>
-                      {u.role === 'ADMIN' ? (
-                        <button
-                          onClick={() => handleUpdateRole(u.id, 'STAFF')}
-                          className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md"
-                        >
-                          Remove from Admin Team
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => handleUpdateRole(u.id, 'ADMIN')}
-                          className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white font-bold rounded-xl shadow-md"
-                        >
-                          Promote to Admin Team
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
+              {currentAlert && currentAlert.is_active === 1 && (
+                <button
+                  onClick={handleResolveAlert}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md"
+                >
+                  Mark Alert Resolved
+                </button>
+              )}
             </div>
-          )}
+
+            <form onSubmit={handleCreateSystemAlert} className="space-y-4 text-xs font-medium">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Alert Severity</label>
+                  <select
+                    value={alertSeverity}
+                    onChange={(e: any) => setAlertSeverity(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  >
+                    <option value="WARNING">Warning (Yellow Banner)</option>
+                    <option value="SEVERE">Severe Warning (Red Banner)</option>
+                    <option value="RESOLVED">Resolved (Green Banner)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Banner Header Title</label>
+                  <input
+                    type="text"
+                    required
+                    value={alertTitle}
+                    onChange={(e) => setAlertTitle(e.target.value)}
+                    placeholder="e.g. V8.10 PING ISSUE"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold uppercase"
+                  />
+                </div>
+
+                <div className="md:col-span-3">
+                  <label className="block text-slate-700 font-bold mb-1">Warning Message Description</label>
+                  <textarea
+                    required
+                    rows={2}
+                    value={alertMessage}
+                    onChange={(e) => setAlertMessage(e.target.value)}
+                    placeholder="Some players may experience higher ping. We are investigating..."
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-800"
+                  ></textarea>
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold rounded-xl shadow-md"
+                >
+                  Publish Warning Banner
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 8: REPORTS */}
+      {activeTab === 'REPORTS' && (
+        <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
+          <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-3">User & Bug Reports Desk</h3>
+          <div className="space-y-3">
+            {reports.map((r) => (
+              <div key={r.id} className="p-4 bg-purple-50/40 rounded-2xl border border-purple-100 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-0.5 bg-purple-100 text-purple-800 font-extrabold rounded">
+                      {r.type} REPORT
+                    </span>
+                    <span className="text-slate-500">Reporter: {r.reporter_name}</span>
+                    {r.target_username && (
+                      <span className="font-bold text-rose-800 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded">
+                        Target: @{r.target_username}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <h4 className="font-bold text-slate-800 text-sm">{r.subject}</h4>
+                <p className="text-slate-700">{r.description}</p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

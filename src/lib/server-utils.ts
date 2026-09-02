@@ -1,67 +1,91 @@
 import { getDb } from './db';
 
-export interface QuotaInfo {
-  requiredQuota: number;
-  completedThisWeek: number;
-  remaining: number;
-  statusBadge: 'ACTIVE' | 'LOA' | 'REDUCED_ACTIVITY';
+export function getUserSuspension(userId: number) {
+  const db = getDb();
+  const nowIso = new Date().toISOString();
+
+  const activeSuspension = db.prepare(`
+    SELECT * FROM consequences
+    WHERE user_id = ? AND type = 'SUSPENSION'
+      AND (expires_at IS NULL OR expires_at > ?)
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(userId, nowIso) as any;
+
+  if (!activeSuspension) return null;
+
+  return {
+    is_suspended: true,
+    reason: activeSuspension.reason,
+    notes: activeSuspension.notes,
+    expires_at: activeSuspension.expires_at,
+  };
 }
 
-export function getUserActiveLOA(userId: number): { type: string; start_date: string; end_date: string } | null {
+export function getUserActiveLOA(userId: number) {
   const db = getDb();
   const today = new Date().toISOString().split('T')[0];
 
-  const stmt = db.prepare(`
-    SELECT type, start_date, end_date
-    FROM loa_requests
+  const active = db.prepare(`
+    SELECT * FROM loa_requests
     WHERE user_id = ? AND status = 'APPROVED'
       AND start_date <= ? AND end_date >= ?
-    ORDER BY id DESC LIMIT 1
-  `);
+    ORDER BY id DESC
+    LIMIT 1
+  `).get(userId, today, today) as any;
 
-  const activeLoa = stmt.get(userId, today, today) as { type: string; start_date: string; end_date: string } | undefined;
-  return activeLoa || null;
+  return active || null;
 }
 
-export function getUserQuotaInfo(userId: number): QuotaInfo {
+export function getUserQuotaInfo(userId: number) {
   const db = getDb();
-  const activeLoa = getUserActiveLOA(userId);
 
-  let requiredQuota = 3;
-  let statusBadge: 'ACTIVE' | 'LOA' | 'REDUCED_ACTIVITY' = 'ACTIVE';
-
-  if (activeLoa) {
-    requiredQuota = 0;
-    statusBadge = activeLoa.type === 'REDUCED_ACTIVITY' ? 'REDUCED_ACTIVITY' : 'LOA';
-  }
-
+  // Get start of current week in BST (Monday 00:00:00)
   const now = new Date();
-  const day = now.getDay();
-  const diffToMon = (day === 0 ? -6 : 1) - day;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + diffToMon);
-  monday.setHours(0, 0, 0, 0);
+  const dayOfWeek = now.getUTCDay(); // 0 is Sun, 1 is Mon
+  const distToMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
 
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  sunday.setHours(23, 59, 59, 999);
+  const mon = new Date(now);
+  mon.setUTCDate(now.getUTCDate() - distToMon);
+  mon.setUTCHours(0, 0, 0, 0);
 
-  const stmt = db.prepare(`
+  const startOfWeekIso = mon.toISOString();
+
+  // Count attended flights this week where attendance_status = PRESENT or LATE or attended = 1
+  const attendedCount = db.prepare(`
     SELECT COUNT(*) as count
     FROM flight_allocations fa
     JOIN flights f ON fa.flight_id = f.id
-    WHERE fa.user_id = ? AND fa.attended = 1
-      AND f.datetime_utc >= ? AND f.datetime_utc <= ?
-  `);
+    WHERE fa.user_id = ?
+      AND (fa.attended = 1 OR fa.attendance_status IN ('PRESENT', 'LATE'))
+      AND f.datetime_utc >= ?
+  `).get(userId, startOfWeekIso) as { count: number };
 
-  const res = stmt.get(userId, monday.toISOString(), sunday.toISOString()) as { count: number };
-  const completedThisWeek = res?.count || 0;
+  const completedThisWeek = attendedCount ? attendedCount.count : 0;
+  const activeLoa = getUserActiveLOA(userId);
+
+  let requiredQuota = 3;
+  let statusBadge = 'ACTIVE';
+
+  if (activeLoa) {
+    if (activeLoa.type === 'LOA') {
+      requiredQuota = 0;
+      statusBadge = 'LOA';
+    } else if (activeLoa.type === 'REDUCED_ACTIVITY') {
+      requiredQuota = 0;
+      statusBadge = 'REDUCED_ACTIVITY';
+    }
+  }
+
   const remaining = Math.max(0, requiredQuota - completedThisWeek);
+  const isCompliant = completedThisWeek >= requiredQuota || statusBadge !== 'ACTIVE';
 
   return {
     requiredQuota,
     completedThisWeek,
     remaining,
-    statusBadge
+    statusBadge,
+    isCompliant,
+    startOfWeekIso,
   };
 }

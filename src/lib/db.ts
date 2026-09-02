@@ -4,7 +4,6 @@ import fs from 'fs';
 import os from 'os';
 import bcrypt from 'bcryptjs';
 
-// On Vercel serverless functions, process.cwd() is read-only. Use os.tmpdir() (/tmp)
 const isVercel = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
 const dbDir = isVercel ? os.tmpdir() : process.cwd();
 const dbPath = path.join(dbDir, 'data.db');
@@ -111,6 +110,7 @@ function initSchema(db: DatabaseSync) {
       type TEXT NOT NULL,
       reason TEXT NOT NULL,
       notes TEXT,
+      expires_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -131,13 +131,36 @@ function initSchema(db: DatabaseSync) {
       is_read INTEGER NOT NULL DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS system_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS system_alerts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      severity TEXT NOT NULL DEFAULT 'WARNING', -- 'WARNING', 'SEVERE', 'RESOLVED'
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
-  // Migration helper for attendance_status column
+  // Migration helpers
   try {
     db.exec(`ALTER TABLE flight_allocations ADD COLUMN attendance_status TEXT DEFAULT 'NONE';`);
-  } catch (e) {
-    // Column already exists
+  } catch (e) {}
+
+  try {
+    db.exec(`ALTER TABLE consequences ADD COLUMN expires_at DATETIME;`);
+  } catch (e) {}
+
+  // Initial maintenance setting if missing
+  const maintStmt = db.prepare(`SELECT * FROM system_settings WHERE key = 'maintenance_mode'`);
+  if (!maintStmt.get()) {
+    db.prepare(`INSERT INTO system_settings (key, value) VALUES ('maintenance_mode', '0')`).run();
+    db.prepare(`INSERT INTO system_settings (key, value) VALUES ('maintenance_message', 'Luma Airways portal is currently under scheduled maintenance. Please check back shortly.')`).run();
   }
 
   // Seed Founder Account if missing
