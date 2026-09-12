@@ -1,11 +1,12 @@
-import { getConsequencesList, getLOARequestsList, getAllocationsList, getFlightsList } from './firebase-db';
+import { getConsequencesList, getLOARequestsList, getAllocationsList, getFlightsList, getFlightLogsList } from './firebase-db';
 
 export async function getUserSuspension(userId: number) {
   const consequences = await getConsequencesList();
   const nowIso = new Date().toISOString();
 
   const userSuspensions = consequences
-    .filter((c: any) => Number(c.user_id) === Number(userId) && c.type === 'SUSPENSION')
+    .filter((c: any) => Number(c.user_id) === Number(userId) && (c.type === 'SUSPENSION' || c.tier === 'C5A' || c.tier === 'C5B'))
+    .filter((c: any) => c.status === 'ACTIVE')
     .filter((c: any) => !c.expires_at || c.expires_at > nowIso)
     .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
@@ -35,6 +36,7 @@ export async function getUserActiveLOA(userId: number) {
 export async function getUserQuotaInfo(userId: number) {
   const allocations = await getAllocationsList();
   const flights = await getFlightsList();
+  const logs = await getFlightLogsList();
 
   const now = new Date();
   const dayOfWeek = now.getUTCDay();
@@ -57,6 +59,12 @@ export async function getUserQuotaInfo(userId: number) {
       completedThisWeek++;
     }
   }
+
+  // Count accepted flight logs submitted this week
+  const acceptedLogs = logs.filter(
+    (l: any) => Number(l.user_id) === Number(userId) && l.status === 'ACCEPTED' && l.created_at >= startOfWeekIso
+  );
+  completedThisWeek += acceptedLogs.length;
 
   const activeLoa = await getUserActiveLOA(userId);
 

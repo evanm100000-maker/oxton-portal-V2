@@ -12,63 +12,84 @@ import {
   Search, 
   ChevronRight
 } from 'lucide-react';
+import { database } from '@/lib/firebase';
+import { ref, onValue } from 'firebase/database';
+import { parseFirebaseSnapshot } from '@/lib/realtime-sync';
 import { formatDateLocal } from '@/lib/utils';
 
 export default function RosterCalendarPage() {
   const [viewMode, setViewMode] = useState<'CALENDAR' | 'DIRECTORY'>('CALENDAR');
-  const [flights, setFlights] = useState<any[]>([]);
+  const [user, setUser] = useState<any>(null);
+  const [rawFlights, setRawFlights] = useState<any[]>([]);
+  const [rawAllocations, setRawAllocations] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
   const [selectedFlight, setSelectedFlight] = useState<any>(null);
 
-  const fetchFlightsAndUsers = () => {
-    fetch('/api/flights')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.flights) setFlights(data.flights);
-        setLoading(false);
-      });
-
-    fetch('/api/admin/users')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.users) setUsers(data.users);
-      });
-  };
-
   useEffect(() => {
-    fetchFlightsAndUsers();
-    // Live Auto Refresh Polling every 3 seconds
-    const interval = setInterval(fetchFlightsAndUsers, 3000);
-    return () => clearInterval(interval);
+    fetch(`/api/auth/me?t=${Date.now()}`, { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.user) setUser(data.user);
+      });
+
+    const unsubFlights = onValue(ref(database, 'flights'), (snap) => {
+      setRawFlights(parseFirebaseSnapshot(snap));
+      setLoading(false);
+    });
+
+    const unsubAlloc = onValue(ref(database, 'allocations'), (snap) => {
+      const val = snap.val();
+      setRawAllocations(val ? Object.values(val).filter(Boolean) : []);
+    });
+
+    const unsubUsers = onValue(ref(database, 'users'), (snap) => {
+      setUsers(parseFirebaseSnapshot(snap));
+    });
+
+    return () => {
+      unsubFlights();
+      unsubAlloc();
+      unsubUsers();
+    };
   }, []);
 
-  const handleAllocation = async (flightId: number, status: 'ATTENDING' | 'UNSURE' | 'ABSENT') => {
-    // Optimistic Immediate UI Update
-    setFlights((prev) =>
-      prev.map((f) => {
-        if (f.id === flightId) {
-          return { ...f, my_status: status };
-        }
-        return f;
-      })
-    );
+  // Compute flights with allocations in real-time
+  const flights = rawFlights.map((flight) => {
+    const flightAllocations = rawAllocations.filter((a: any) => Number(a.flight_id) === Number(flight.id));
 
+    const enrichedAllocations = flightAllocations.map((alloc: any) => {
+      const u = users.find((usr: any) => Number(usr.id) === Number(alloc.user_id));
+      return {
+        ...alloc,
+        preferred_name: u?.preferred_name || 'Staff Member',
+        roblox_username: u?.roblox_username || 'Unknown',
+        role: u?.role || 'STAFF'
+      };
+    });
+
+    const myAlloc = flightAllocations.find((a: any) => Number(a.user_id) === Number(user?.id));
+
+    return {
+      ...flight,
+      my_status: myAlloc ? myAlloc.status : 'UNALLOCATED',
+      allocations: enrichedAllocations
+    };
+  });
+
+  const handleAllocation = async (flightId: number, status: 'ATTENDING' | 'UNSURE' | 'ABSENT') => {
     if (selectedFlight && selectedFlight.id === flightId) {
       setSelectedFlight({ ...selectedFlight, my_status: status });
     }
 
     try {
-      const res = await fetch('/api/allocations', {
+      await fetch('/api/allocations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ flight_id: flightId, status }),
       });
-      if (res.ok) {
-        fetchFlightsAndUsers();
-      }
     } catch (err) {
       console.error('Allocation update error:', err);
     }

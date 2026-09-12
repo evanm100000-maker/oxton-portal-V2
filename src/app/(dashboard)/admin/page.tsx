@@ -15,28 +15,40 @@ import {
   CheckCircle2, 
   XCircle, 
   Crown,
-  ChevronRight,
-  Send,
-  UserX,
-  Bug,
-  HelpCircle,
   Sparkles,
   ClipboardCheck,
   Wrench,
-  AlertOctagon,
   Power,
-  Trash2
+  Trash2,
+  FileText,
+  AlertOctagon,
+  HelpCircle,
+  ShieldAlert
 } from 'lucide-react';
 import { database } from '@/lib/firebase';
 import { ref, onValue } from 'firebase/database';
 import { parseFirebaseSnapshot } from '@/lib/realtime-sync';
 
+const TIER_OPTIONS = [
+  { value: 'C1', label: 'C1 - Warning' },
+  { value: 'C2', label: 'C2 - Warning' },
+  { value: 'C3', label: 'C3 - Informal Sanction' },
+  { value: 'C4A', label: 'C4A - 20 Minute Detention' },
+  { value: 'C4B', label: 'C4B - 30 Minute Detention' },
+  { value: 'C5A', label: 'C5A - 2 Day Suspension' },
+  { value: 'C5B', label: 'C5B - Indefinite Suspension' },
+];
+
 export default function AdminPanelPage() {
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'SIGNUPS' | 'FLIGHTS' | 'LOA' | 'ROSTER' | 'CONSEQUENCES' | 'TICKETS' | 'REPORTS' | 'ANNOUNCEMENTS' | 'STAFF_ADMINS' | 'MAINTENANCE_ALERTS'>('STAFF_ADMINS');
+  const [activeTab, setActiveTab] = useState<
+    'STAFF_ADMINS' | 'SIGNUPS' | 'FLIGHTS' | 'FLIGHT_LOGS' | 'DETENTIONS' | 'CONSEQUENCES' | 'LOA' | 'MAINTENANCE_ALERTS' | 'ANNOUNCEMENTS' | 'REPORTS' | 'TICKETS'
+  >('STAFF_ADMINS');
 
   const [users, setUsers] = useState<any[]>([]);
   const [flights, setFlights] = useState<any[]>([]);
+  const [flightLogs, setFlightLogs] = useState<any[]>([]);
+  const [detentions, setDetentions] = useState<any[]>([]);
   const [loaRequests, setLoaRequests] = useState<any[]>([]);
   const [tickets, setTickets] = useState<any[]>([]);
   const [reports, setReports] = useState<any[]>([]);
@@ -64,10 +76,21 @@ export default function AdminPanelPage() {
 
   // Consequence state
   const [consUserId, setConsUserId] = useState<number | ''>('');
-  const [consType, setConsType] = useState<'INFORMAL_SANCTION' | 'INFRACTION' | 'SUSPENSION'>('INFORMAL_SANCTION');
+  const [consTier, setConsTier] = useState<string>('C1');
   const [consReason, setConsReason] = useState('');
   const [consNotes, setConsNotes] = useState('');
-  const [consDays, setConsDays] = useState('7');
+  const [consDeadline, setConsDeadline] = useState('');
+  const [consDays, setConsDays] = useState('2');
+
+  // Detention session creation state
+  const [detentionDate, setDetentionDate] = useState(new Date().toISOString().split('T')[0]);
+  const [detentionNotes, setDetentionNotes] = useState('');
+  const [detentionRegisterMap, setDetentionRegisterMap] = useState<Record<number, 'PASSED' | 'FAILED'>>({});
+  const [detentionSubmitting, setDetentionSubmitting] = useState(false);
+
+  // Flight Log Review Modal State
+  const [reviewingLog, setReviewingLog] = useState<any>(null);
+  const [reviewAdminNotes, setReviewAdminNotes] = useState('');
 
   const [annTitle, setAnnTitle] = useState('');
   const [annContent, setAnnContent] = useState('');
@@ -84,6 +107,8 @@ export default function AdminPanelPage() {
     // Attach direct Firebase WebSockets listeners for instant real-time sync across all devices
     const unsubUsers = onValue(ref(database, 'users'), (snap) => setUsers(parseFirebaseSnapshot(snap)));
     const unsubFlights = onValue(ref(database, 'flights'), (snap) => setFlights(parseFirebaseSnapshot(snap)));
+    const unsubLogs = onValue(ref(database, 'flight_logs'), (snap) => setFlightLogs(parseFirebaseSnapshot(snap)));
+    const unsubDetentions = onValue(ref(database, 'detentions'), (snap) => setDetentions(parseFirebaseSnapshot(snap)));
     const unsubLoa = onValue(ref(database, 'loa_requests'), (snap) => setLoaRequests(parseFirebaseSnapshot(snap)));
     const unsubTickets = onValue(ref(database, 'tickets'), (snap) => setTickets(parseFirebaseSnapshot(snap)));
     const unsubReports = onValue(ref(database, 'reports'), (snap) => setReports(parseFirebaseSnapshot(snap)));
@@ -114,6 +139,8 @@ export default function AdminPanelPage() {
     return () => {
       unsubUsers();
       unsubFlights();
+      unsubLogs();
+      unsubDetentions();
       unsubLoa();
       unsubTickets();
       unsubReports();
@@ -206,19 +233,25 @@ export default function AdminPanelPage() {
     }
   };
 
+  // Open Flight Attendance Register Modal (ONLY staff members who marked ATTENDING appear)
   const openRegisterModal = (flight: any) => {
     setSelectedFlight(flight);
     const initialMap: Record<number, 'PRESENT' | 'LATE' | 'ABSENT'> = {};
-    activeStaff.forEach((s) => {
+
+    const registerStaff = activeStaff.filter((s) => {
+      const existingAlloc = flight.allocations?.find((a: any) => Number(a.user_id) === Number(s.id));
+      return existingAlloc && (existingAlloc.status === 'ATTENDING' || (existingAlloc.attendance_status && existingAlloc.attendance_status !== 'NONE'));
+    });
+
+    registerStaff.forEach((s) => {
       const existingAlloc = flight.allocations?.find((a: any) => Number(a.user_id) === Number(s.id));
       if (existingAlloc && existingAlloc.attendance_status && existingAlloc.attendance_status !== 'NONE') {
         initialMap[s.id] = existingAlloc.attendance_status;
-      } else if (existingAlloc && existingAlloc.status === 'ATTENDING') {
-        initialMap[s.id] = 'PRESENT';
       } else {
-        initialMap[s.id] = 'ABSENT';
+        initialMap[s.id] = 'PRESENT';
       }
     });
+
     setAttendanceMap(initialMap);
   };
 
@@ -249,30 +282,22 @@ export default function AdminPanelPage() {
     }
   };
 
-  const handleIssueRosterInfraction = async (targetUserId: number) => {
-    const res = await fetch('/api/admin/roster-infraction', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target_user_id: targetUserId }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      alert(`Error: ${data.error}`);
-    } else {
-      setFeedback('Infraction issued for missed weekly quota!');
-    }
-  };
-
+  // Issue Consequence Handler
   const handleIssueConsequence = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!consUserId) return;
 
     let expiresAt: string | null = null;
-    if (consType === 'SUSPENSION' && consDays) {
+    if (consTier === 'C5A' && consDays) {
       const days = parseInt(consDays);
       const exp = new Date();
       exp.setDate(exp.getDate() + days);
       expiresAt = exp.toISOString();
+    }
+
+    let deadlineIso: string | null = null;
+    if ((consTier === 'C4A' || consTier === 'C4B') && consDeadline) {
+      deadlineIso = new Date(consDeadline).toISOString();
     }
 
     const res = await fetch('/api/consequences', {
@@ -280,17 +305,78 @@ export default function AdminPanelPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         user_id: consUserId,
-        type: consType,
+        tier: consTier,
         reason: consReason,
         notes: consNotes,
+        timeframe_deadline: deadlineIso,
         expires_at: expiresAt,
       }),
     });
+
     if (res.ok) {
-      setFeedback('Consequence successfully issued.');
+      setFeedback(`Disciplinary consequence (${consTier}) successfully issued!`);
       setConsReason('');
       setConsNotes('');
       setConsUserId('');
+      setConsDeadline('');
+    }
+  };
+
+  // Detention Register Submit Handler
+  const handleCompleteDetentionRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDetentionSubmitting(true);
+
+    const pendingC4s = consequences.filter(
+      (c) => (c.tier === 'C4A' || c.tier === 'C4B' || c.type === 'C4A' || c.type === 'C4B') && (c.status === 'ACTIVE' || !c.status)
+    );
+
+    const entries = pendingC4s.map((c) => ({
+      user_id: c.user_id,
+      consequence_id: c.id,
+      status: detentionRegisterMap[c.id] || 'PASSED',
+    }));
+
+    try {
+      const res = await fetch('/api/detentions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_date: detentionDate,
+          notes: detentionNotes,
+          entries,
+        }),
+      });
+
+      if (res.ok) {
+        setFeedback('Daily detention session register submitted! Passed detentions cleared, failed C4As escalated to C4B.');
+        setDetentionNotes('');
+      }
+    } catch (err: any) {
+      alert(`Detention submit error: ${err.message}`);
+    } finally {
+      setDetentionSubmitting(false);
+    }
+  };
+
+  // Review Flight Log (Accept / Reject)
+  const handleReviewFlightLog = async (action: 'ACCEPT' | 'REJECT') => {
+    if (!reviewingLog) return;
+
+    const res = await fetch('/api/flight-logs', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        log_id: reviewingLog.id,
+        action,
+        admin_notes: reviewAdminNotes,
+      }),
+    });
+
+    if (res.ok) {
+      setFeedback(`Flight log ${action === 'ACCEPT' ? 'ACCEPTED (+1 Quota)' : 'REJECTED'}.`);
+      setReviewingLog(null);
+      setReviewAdminNotes('');
     }
   };
 
@@ -357,6 +443,10 @@ export default function AdminPanelPage() {
 
   const pendingSignups = users.filter((u) => u.status === 'PENDING');
   const activeStaff = users.filter((u) => u.status === 'ACTIVE');
+  const pendingLogs = flightLogs.filter((l) => l.status === 'PENDING');
+  const pendingC4s = consequences.filter(
+    (c) => (c.tier === 'C4A' || c.tier === 'C4B' || c.type === 'C4A' || c.type === 'C4B') && (c.status === 'ACTIVE' || !c.status)
+  );
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -374,7 +464,7 @@ export default function AdminPanelPage() {
               <div>
                 <h1 className="text-2xl font-black tracking-tight">Executive Admin Portal</h1>
                 <p className="text-purple-100 text-xs font-medium mt-0.5">
-                  High-Rank operations, signups, flight registers, LOAs, staff management, consequences, and system alerts. Realtime WebSocket sync active.
+                  Full control center: Staff management, flight logs, detention registers, C1-C5B consequences, LOAs, maintenance, and alerts. Realtime WebSockets active.
                 </p>
               </div>
             </div>
@@ -398,7 +488,7 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* Tabs */}
+      {/* Navigation Tabs */}
       <div className="flex flex-wrap gap-2 border-b border-purple-100 bg-white p-2 rounded-2xl shadow-md overflow-x-auto text-xs font-bold">
         <button
           onClick={() => setActiveTab('STAFF_ADMINS')}
@@ -407,7 +497,37 @@ export default function AdminPanelPage() {
           }`}
         >
           <Users className="w-4 h-4" />
-          Staff Directory & Admins ({activeStaff.length})
+          Staff & Admins ({activeStaff.length})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('FLIGHT_LOGS')}
+          className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 ${
+            activeTab === 'FLIGHT_LOGS' ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-purple-50'
+          }`}
+        >
+          <FileText className="w-4 h-4" />
+          Flight Logs ({pendingLogs.length} Pending)
+        </button>
+
+        <button
+          onClick={() => setActiveTab('DETENTIONS')}
+          className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 ${
+            activeTab === 'DETENTIONS' ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-purple-50'
+          }`}
+        >
+          <Clock className="w-4 h-4" />
+          Detention Register ({pendingC4s.length} C4s)
+        </button>
+
+        <button
+          onClick={() => setActiveTab('CONSEQUENCES')}
+          className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 ${
+            activeTab === 'CONSEQUENCES' ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-purple-50'
+          }`}
+        >
+          <AlertTriangle className="w-4 h-4" />
+          Issue Consequence ({consequences.length})
         </button>
 
         <button
@@ -432,7 +552,7 @@ export default function AdminPanelPage() {
           }`}
         >
           <CalendarDays className="w-4 h-4" />
-          Flight Schedules ({flights.length})
+          Flights & Registers ({flights.length})
         </button>
 
         <button
@@ -446,23 +566,13 @@ export default function AdminPanelPage() {
         </button>
 
         <button
-          onClick={() => setActiveTab('CONSEQUENCES')}
-          className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 ${
-            activeTab === 'CONSEQUENCES' ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-purple-50'
-          }`}
-        >
-          <AlertTriangle className="w-4 h-4" />
-          Consequences ({consequences.length})
-        </button>
-
-        <button
           onClick={() => setActiveTab('MAINTENANCE_ALERTS')}
           className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 ${
             activeTab === 'MAINTENANCE_ALERTS' ? 'bg-gradient-to-r from-rose-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-purple-50'
           }`}
         >
           <Wrench className="w-4 h-4" />
-          Maintenance & Warning Banners
+          Maintenance & Alerts
         </button>
 
         <button
@@ -472,7 +582,7 @@ export default function AdminPanelPage() {
           }`}
         >
           <Megaphone className="w-4 h-4" />
-          Announcements ({announcements.length})
+          Announcements
         </button>
 
         <button
@@ -482,30 +592,20 @@ export default function AdminPanelPage() {
           }`}
         >
           <Flag className="w-4 h-4" />
-          Reports ({reports.length})
-        </button>
-
-        <button
-          onClick={() => setActiveTab('TICKETS')}
-          className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 ${
-            activeTab === 'TICKETS' ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-purple-50'
-          }`}
-        >
-          <LifeBuoy className="w-4 h-4" />
-          Support Tickets ({tickets.length})
+          Reports
         </button>
       </div>
 
-      {/* TAB 1: ALL STAFF & ADMIN MANAGEMENT WITH CONSEQUENCES */}
+      {/* TAB 1: STAFF DIRECTORY & ROLES */}
       {activeTab === 'STAFF_ADMINS' && (
         <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
           <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
             <div>
               <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                <Users className="w-5 h-5 text-purple-600" /> Staff Directory, Role Management & Consequences
+                <Users className="w-5 h-5 text-purple-600" /> Staff Directory & Consequences Overview
               </h3>
               <p className="text-xs text-slate-500">
-                All staff members are listed with their role badges displayed next to their names. View or remove active consequences and change user roles.
+                Manage roles and view disciplinary records logged directly on staff profiles.
               </p>
             </div>
           </div>
@@ -517,13 +617,9 @@ export default function AdminPanelPage() {
                 <div key={u.id} className="p-5 bg-purple-50/40 rounded-3xl border border-purple-100 space-y-3 text-xs">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      {u.avatar_url ? (
-                        <img src={u.avatar_url} alt={u.preferred_name} className="w-12 h-12 rounded-2xl object-cover border border-purple-200" />
-                      ) : (
-                        <div className="w-12 h-12 bg-gradient-to-tr from-blue-600 to-purple-600 text-white font-bold rounded-2xl flex items-center justify-center text-base shadow-md">
-                          {u.preferred_name.charAt(0)}
-                        </div>
-                      )}
+                      <div className="w-12 h-12 bg-gradient-to-tr from-blue-600 to-purple-600 text-white font-bold rounded-2xl flex items-center justify-center text-base shadow-md">
+                        {u.preferred_name.charAt(0)}
+                      </div>
 
                       <div className="space-y-0.5">
                         <div className="font-extrabold text-slate-800 text-sm flex items-center gap-2 flex-wrap">
@@ -542,7 +638,6 @@ export default function AdminPanelPage() {
                       </div>
                     </div>
 
-                    {/* Action buttons */}
                     {u.role !== 'FOUNDER' && (
                       <div className="flex items-center gap-2">
                         {u.role === 'ADMIN' ? (
@@ -564,11 +659,10 @@ export default function AdminPanelPage() {
                     )}
                   </div>
 
-                  {/* Consequences List for this user */}
                   <div className="border-t border-purple-100/80 pt-3">
                     <div className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-2">
                       <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-                      Issued Consequences ({userCons.length})
+                      Logged Consequences ({userCons.length})
                     </div>
 
                     {userCons.length === 0 ? (
@@ -579,21 +673,19 @@ export default function AdminPanelPage() {
                           <div key={c.id} className="p-3 bg-white rounded-2xl border border-purple-100 flex items-center justify-between gap-3">
                             <div className="space-y-0.5">
                               <div className="flex items-center gap-2">
-                                <span className={`px-2 py-0.5 rounded font-extrabold text-[10px] ${
-                                  c.type === 'SUSPENSION' ? 'bg-rose-100 text-rose-800' : c.type === 'INFRACTION' ? 'bg-orange-100 text-orange-800' : 'bg-amber-100 text-amber-800'
-                                }`}>
-                                  {c.type.replace('_', ' ')}
+                                <span className="px-2 py-0.5 bg-purple-100 text-purple-800 font-extrabold text-[10px] rounded border border-purple-200">
+                                  {c.tier || c.type}
                                 </span>
                                 <span className="font-bold text-slate-800 text-xs">{c.reason}</span>
                               </div>
-                              <p className="text-slate-500 text-[11px]">Issued: {new Date(c.created_at).toLocaleDateString()}</p>
+                              <p className="text-slate-500 text-[11px]">Issued: {new Date(c.created_at).toLocaleDateString()} | Status: {c.status || 'ACTIVE'}</p>
                             </div>
 
                             <button
                               onClick={() => handleRemoveConsequence(c.id)}
                               className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-[11px] flex items-center gap-1 shadow-sm"
                             >
-                              <Trash2 className="w-3.5 h-3.5" /> Remove Consequence
+                              <Trash2 className="w-3.5 h-3.5" /> Remove
                             </button>
                           </div>
                         ))}
@@ -607,7 +699,297 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 2: PENDING SIGNUPS */}
+      {/* TAB 2: FLIGHT LOGS APPROVAL */}
+      {activeTab === 'FLIGHT_LOGS' && (
+        <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
+          <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <FileText className="w-5 h-5 text-purple-600" /> Flight Log Approval Queue ({flightLogs.length})
+              </h3>
+              <p className="text-xs text-slate-500">
+                Staff members submit flight logs for flights conducted on that day. Accepting a log adds +1 to their weekly quota.
+              </p>
+            </div>
+          </div>
+
+          {flightLogs.length === 0 ? (
+            <p className="text-xs text-slate-400 text-center py-8">No flight logs submitted yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {flightLogs.map((log) => (
+                <div key={log.id} className="p-4 bg-purple-50/40 rounded-2xl border border-purple-100 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-extrabold text-slate-800 text-sm">{log.user_name} (@{log.roblox_username})</span>
+                      <span className="px-2.5 py-0.5 bg-purple-100 text-purple-800 font-extrabold rounded">
+                        {log.flight_code}
+                      </span>
+                      <span className="px-2 py-0.5 bg-blue-100 text-blue-800 font-bold rounded">
+                        Role: {log.role_flown}
+                      </span>
+                      <span className={`px-2 py-0.5 font-bold rounded text-[10px] ${
+                        log.status === 'ACCEPTED' ? 'bg-emerald-100 text-emerald-800' : log.status === 'REJECTED' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {log.status}
+                      </span>
+                    </div>
+                    <p className="text-slate-600">Submitted: {new Date(log.created_at).toLocaleString()}</p>
+                    {log.proof_notes && <p className="text-slate-700 bg-white p-2 rounded-xl border border-slate-200">Proof: {log.proof_notes}</p>}
+                  </div>
+
+                  {log.status === 'PENDING' ? (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setReviewingLog(log)}
+                        className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold rounded-xl shadow-md"
+                      >
+                        Review Log
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-slate-400 font-semibold italic">Reviewed</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 3: DETENTION LOG & REGISTER */}
+      {activeTab === 'DETENTIONS' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
+            <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-purple-600" /> Daily Detention Session & Register Log
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Admins can run a detention register for users with active C4s. Marking **PASS** clears the C4 from upcoming sanctions. Marking **FAIL** automatically escalates C4A to C4B (30 min detention).
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleCompleteDetentionRegister} className="space-y-4 text-xs font-medium">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Detention Session Date</label>
+                  <input
+                    type="date"
+                    required
+                    value={detentionDate}
+                    onChange={(e) => setDetentionDate(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Session Notes (Optional)</label>
+                  <input
+                    type="text"
+                    value={detentionNotes}
+                    onChange={(e) => setDetentionNotes(e.target.value)}
+                    placeholder="e.g. Conducted by Capt. Alex"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <h4 className="font-bold text-slate-800 text-sm mb-2">Staff Members with Active C4 Detentions ({pendingC4s.length})</h4>
+                {pendingC4s.length === 0 ? (
+                  <p className="text-slate-400 italic py-4">No staff members currently have pending C4 detentions.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {pendingC4s.map((c) => {
+                      const u = activeStaff.find((usr) => Number(usr.id) === Number(c.user_id));
+                      const currentRes = detentionRegisterMap[c.id] || 'PASSED';
+                      return (
+                        <div key={c.id} className="p-3.5 bg-purple-50/50 rounded-2xl border border-purple-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div>
+                            <div className="font-bold text-slate-800 text-xs">
+                              {u?.preferred_name || 'Staff'} (@{u?.roblox_username || 'Staff'})
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="px-2 py-0.5 bg-purple-100 text-purple-800 font-black rounded text-[10px]">
+                                {c.tier || c.type}
+                              </span>
+                              <span className="text-slate-600 text-[11px]">{c.reason}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setDetentionRegisterMap({ ...detentionRegisterMap, [c.id]: 'PASSED' })}
+                              className={`px-4 py-2 rounded-xl font-bold text-xs transition-all ${
+                                currentRes === 'PASSED' ? 'bg-emerald-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200'
+                              }`}
+                            >
+                              ✓ PASS (Clear C4)
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setDetentionRegisterMap({ ...detentionRegisterMap, [c.id]: 'FAILED' })}
+                              className={`px-4 py-2 rounded-xl font-bold text-xs transition-all ${
+                                currentRes === 'FAILED' ? 'bg-rose-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200'
+                              }`}
+                            >
+                              ✕ FAIL (Escalate C4A to C4B)
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {pendingC4s.length > 0 && (
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="submit"
+                    disabled={detentionSubmitting}
+                    className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
+                  >
+                    {detentionSubmitting ? 'Saving...' : 'Submit Detention Register'}
+                  </button>
+                </div>
+              )}
+            </form>
+          </div>
+
+          <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
+            <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-3">Historical Detention Sessions ({detentions.length})</h3>
+            {detentions.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center py-6">No detention sessions recorded yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {detentions.map((s) => (
+                  <div key={s.id} className="p-4 bg-purple-50/40 rounded-2xl border border-purple-100 text-xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-extrabold text-slate-800">Session Date: {s.session_date}</span>
+                      <span className="text-slate-500">Conducted by: {s.created_by_name || 'Admin'}</span>
+                    </div>
+                    {s.notes && <p className="text-slate-600">Notes: {s.notes}</p>}
+                    <div className="pt-2 flex flex-wrap gap-2">
+                      {s.entries?.map((e: any, idx: number) => (
+                        <span key={idx} className={`px-2.5 py-1 rounded-md font-bold text-[10px] ${
+                          e.status === 'PASSED' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                        }`}>
+                          User #{e.user_id}: {e.status}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: ISSUE CONSEQUENCES */}
+      {activeTab === 'CONSEQUENCES' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
+            <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-3">Issue Disciplinary Consequence (Reworked System)</h3>
+            <form onSubmit={handleIssueConsequence} className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-medium">
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Target Staff Member</label>
+                <select
+                  required
+                  value={consUserId}
+                  onChange={(e) => setConsUserId(Number(e.target.value))}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
+                >
+                  <option value="">Select staff member...</option>
+                  {activeStaff.map((s) => (
+                    <option key={s.id} value={s.id}>{s.preferred_name} (@{s.roblox_username})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Consequence Tier</label>
+                <select
+                  value={consTier}
+                  onChange={(e) => setConsTier(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
+                >
+                  {TIER_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {(consTier === 'C4A' || consTier === 'C4B') ? (
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Detention Sitting Timeframe / Deadline</label>
+                  <input
+                    type="datetime-local"
+                    required
+                    value={consDeadline}
+                    onChange={(e) => setConsDeadline(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
+                  />
+                </div>
+              ) : consTier === 'C5A' ? (
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Suspension Duration (Days)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="365"
+                    value={consDays}
+                    onChange={(e) => setConsDays(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Sanction Scope</label>
+                  <div className="p-2.5 bg-slate-100 rounded-xl font-semibold text-slate-600">Standard Disciplinary Log</div>
+                </div>
+              )}
+
+              <div className="md:col-span-3">
+                <label className="block text-slate-700 font-bold mb-1">Reason for Consequence</label>
+                <input
+                  type="text"
+                  required
+                  value={consReason}
+                  onChange={(e) => setConsReason(e.target.value)}
+                  placeholder="e.g. Unprofessional demeanor / Missed weekly quota"
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
+                />
+              </div>
+
+              <div className="md:col-span-3">
+                <label className="block text-slate-700 font-bold mb-1">Additional Internal Notes (Optional)</label>
+                <textarea
+                  rows={2}
+                  value={consNotes}
+                  onChange={(e) => setConsNotes(e.target.value)}
+                  placeholder="Internal administrative details..."
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800"
+                ></textarea>
+              </div>
+
+              <div className="md:col-span-3 flex justify-end">
+                <button type="submit" className="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md">
+                  Issue Disciplinary Consequence
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 5: SIGNUPS */}
       {activeTab === 'SIGNUPS' && (
         <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
           <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-3">Pending Registration Requests</h3>
@@ -643,7 +1025,7 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 3: FLIGHT SCHEDULES & REGISTER */}
+      {/* TAB 6: FLIGHT SCHEDULES & REGISTERS */}
       {activeTab === 'FLIGHTS' && (
         <div className="space-y-6">
           <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
@@ -748,68 +1130,84 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* REGISTER MODAL */}
+      {/* REGISTER MODAL FOR FLIGHT */}
       {selectedFlight && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 max-w-xl w-full shadow-2xl border border-purple-100 space-y-4 text-slate-800">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-lg font-bold text-slate-800">Attendance Register: {selectedFlight.flight_code}</h3>
-                <p className="text-xs text-slate-500">Select Present, Late, or Absent for each active staff member.</p>
+                <p className="text-xs text-slate-500">Only staff members who marked "ATTENDING" (coming) on this flight appear in the register.</p>
               </div>
               <button onClick={() => setSelectedFlight(null)} className="text-slate-400 font-bold text-lg">✕</button>
             </div>
 
             <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-              {activeStaff.map((u) => {
-                const currentStatus = attendanceMap[u.id] || 'ABSENT';
-                return (
-                  <div key={u.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-purple-50/40 rounded-xl border border-purple-100 gap-2">
-                    <div>
-                      <div className="font-bold text-slate-800 text-xs">{u.preferred_name} (@{u.roblox_username})</div>
-                      <div className="text-slate-500 text-[10px]">{u.role}</div>
+              {(() => {
+                const attendingStaff = activeStaff.filter((s) => {
+                  const existingAlloc = selectedFlight?.allocations?.find((a: any) => Number(a.user_id) === Number(s.id));
+                  return existingAlloc && (existingAlloc.status === 'ATTENDING' || (existingAlloc.attendance_status && existingAlloc.attendance_status !== 'NONE'));
+                });
+
+                if (attendingStaff.length === 0) {
+                  return (
+                    <div className="p-8 text-center text-slate-400 space-y-1">
+                      <p className="font-bold text-slate-700 text-sm">No Staff Members Marked Attending</p>
+                      <p className="text-xs">Only staff members who mark "ATTENDING" (coming) on this flight are populated into the register.</p>
                     </div>
+                  );
+                }
 
-                    <div className="flex items-center gap-1 text-xs">
-                      <button
-                        type="button"
-                        onClick={() => setAttendanceMap({ ...attendanceMap, [u.id]: 'PRESENT' })}
-                        className={`px-3 py-1.5 rounded-lg font-bold text-[11px] transition-all ${
-                          currentStatus === 'PRESENT'
-                            ? 'bg-emerald-600 text-white shadow-sm'
-                            : 'bg-white text-slate-600 hover:bg-emerald-50 border border-slate-200'
-                        }`}
-                      >
-                        Present
-                      </button>
+                return attendingStaff.map((u) => {
+                  const currentStatus = attendanceMap[u.id] || 'PRESENT';
+                  return (
+                    <div key={u.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-purple-50/40 rounded-xl border border-purple-100 gap-2">
+                      <div>
+                        <div className="font-bold text-slate-800 text-xs">{u.preferred_name} (@{u.roblox_username})</div>
+                        <div className="text-slate-500 text-[10px]">{u.role}</div>
+                      </div>
 
-                      <button
-                        type="button"
-                        onClick={() => setAttendanceMap({ ...attendanceMap, [u.id]: 'LATE' })}
-                        className={`px-3 py-1.5 rounded-lg font-bold text-[11px] transition-all ${
-                          currentStatus === 'LATE'
-                            ? 'bg-amber-500 text-white shadow-sm'
-                            : 'bg-white text-slate-600 hover:bg-amber-50 border border-slate-200'
-                        }`}
-                      >
-                        Late
-                      </button>
+                      <div className="flex items-center gap-1 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setAttendanceMap({ ...attendanceMap, [u.id]: 'PRESENT' })}
+                          className={`px-3 py-1.5 rounded-lg font-bold text-[11px] transition-all ${
+                            currentStatus === 'PRESENT'
+                              ? 'bg-emerald-600 text-white shadow-sm'
+                              : 'bg-white text-slate-600 hover:bg-emerald-50 border border-slate-200'
+                          }`}
+                        >
+                          Present
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() => setAttendanceMap({ ...attendanceMap, [u.id]: 'ABSENT' })}
-                        className={`px-3 py-1.5 rounded-lg font-bold text-[11px] transition-all ${
-                          currentStatus === 'ABSENT'
-                            ? 'bg-rose-600 text-white shadow-sm'
-                            : 'bg-white text-slate-600 hover:bg-rose-50 border border-slate-200'
-                        }`}
-                      >
-                        Absent
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => setAttendanceMap({ ...attendanceMap, [u.id]: 'LATE' })}
+                          className={`px-3 py-1.5 rounded-lg font-bold text-[11px] transition-all ${
+                            currentStatus === 'LATE'
+                              ? 'bg-amber-500 text-white shadow-sm'
+                              : 'bg-white text-slate-600 hover:bg-amber-50 border border-slate-200'
+                          }`}
+                        >
+                          Late
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setAttendanceMap({ ...attendanceMap, [u.id]: 'ABSENT' })}
+                          className={`px-3 py-1.5 rounded-lg font-bold text-[11px] transition-all ${
+                            currentStatus === 'ABSENT'
+                              ? 'bg-rose-600 text-white shadow-sm'
+                              : 'bg-white text-slate-600 hover:bg-rose-50 border border-slate-200'
+                          }`}
+                        >
+                          Absent
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </div>
 
             <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
@@ -827,7 +1225,55 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 4: LOA REQUESTS */}
+      {/* REVIEW FLIGHT LOG MODAL */}
+      {reviewingLog && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-purple-100 space-y-4 text-slate-800">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-lg font-bold text-slate-800">Review Flight Log</h3>
+              <button onClick={() => setReviewingLog(null)} className="text-slate-400 font-bold">✕</button>
+            </div>
+
+            <div className="space-y-2 text-xs bg-purple-50/50 p-3.5 rounded-2xl border border-purple-100">
+              <div>Staff Member: <strong className="text-slate-800">{reviewingLog.user_name} (@{reviewingLog.roblox_username})</strong></div>
+              <div>Flight: <strong className="text-purple-700">{reviewingLog.flight_code}</strong></div>
+              <div>Role Flown: <strong>{reviewingLog.role_flown}</strong></div>
+              {reviewingLog.proof_notes && <div className="mt-1 pt-1 border-t border-purple-100 italic">Proof: {reviewingLog.proof_notes}</div>}
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Management Note (Optional)</label>
+              <input
+                type="text"
+                value={reviewAdminNotes}
+                onChange={(e) => setReviewAdminNotes(e.target.value)}
+                placeholder="Reason for approval / rejection..."
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
+              <button
+                type="button"
+                onClick={() => handleReviewFlightLog('REJECT')}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-md"
+              >
+                Reject Log
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleReviewFlightLog('ACCEPT')}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-md"
+              >
+                Accept Log (+1 Quota)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 7: LOA REQUESTS */}
       {activeTab === 'LOA' && (
         <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
           <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-3">LOA & Reduced Activity Applications</h3>
@@ -870,103 +1316,7 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 5: CONSEQUENCES & SUSPENSION DURATION */}
-      {activeTab === 'CONSEQUENCES' && (
-        <div className="space-y-6">
-          <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
-            <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-3">Issue Disciplinary Consequence</h3>
-            <form onSubmit={handleIssueConsequence} className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-medium">
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Target Staff Member</label>
-                <select
-                  required
-                  value={consUserId}
-                  onChange={(e) => setConsUserId(Number(e.target.value))}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
-                >
-                  <option value="">Select staff member...</option>
-                  {activeStaff.map((s) => (
-                    <option key={s.id} value={s.id}>{s.preferred_name} (@{s.roblox_username})</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Consequence Type</label>
-                <select
-                  value={consType}
-                  onChange={(e: any) => setConsType(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
-                >
-                  <option value="INFORMAL_SANCTION">Informal Sanction</option>
-                  <option value="INFRACTION">Formal Infraction</option>
-                  <option value="SUSPENSION">Staff Suspension</option>
-                </select>
-              </div>
-
-              {consType === 'SUSPENSION' ? (
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Suspension Duration (Days)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="365"
-                    value={consDays}
-                    onChange={(e) => setConsDays(e.target.value)}
-                    placeholder="e.g. 7"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
-                  />
-                </div>
-              ) : (
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Reason</label>
-                  <input
-                    type="text"
-                    required
-                    value={consReason}
-                    onChange={(e) => setConsReason(e.target.value)}
-                    placeholder="e.g. Unprofessional demeanor / Missed quota"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
-                  />
-                </div>
-              )}
-
-              {consType === 'SUSPENSION' && (
-                <div className="md:col-span-3">
-                  <label className="block text-slate-700 font-bold mb-1">Suspension Reason</label>
-                  <input
-                    type="text"
-                    required
-                    value={consReason}
-                    onChange={(e) => setConsReason(e.target.value)}
-                    placeholder="e.g. Repeated quota non-compliance"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
-                  />
-                </div>
-              )}
-
-              <div className="md:col-span-3">
-                <label className="block text-slate-700 font-bold mb-1">Additional Notes (Optional)</label>
-                <textarea
-                  rows={2}
-                  value={consNotes}
-                  onChange={(e) => setConsNotes(e.target.value)}
-                  placeholder="Internal administrative notes..."
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800"
-                ></textarea>
-              </div>
-
-              <div className="md:col-span-3 flex justify-end">
-                <button type="submit" className="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md">
-                  Issue Disciplinary
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 6: MAINTENANCE MODE & FORTNITE WARNING BANNERS */}
+      {/* TAB 8: MAINTENANCE MODE & FORTNITE WARNING BANNERS */}
       {activeTab === 'MAINTENANCE_ALERTS' && (
         <div className="space-y-6">
           <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
@@ -1073,7 +1423,7 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 7: ANNOUNCEMENTS */}
+      {/* TAB 9: ANNOUNCEMENTS */}
       {activeTab === 'ANNOUNCEMENTS' && (
         <div className="space-y-6">
           <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
@@ -1136,7 +1486,7 @@ export default function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 8: REPORTS */}
+      {/* TAB 10: REPORTS */}
       {activeTab === 'REPORTS' && (
         <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
           <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-3">User & Bug Reports Desk</h3>

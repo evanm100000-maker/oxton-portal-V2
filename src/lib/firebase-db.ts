@@ -307,6 +307,7 @@ export async function createConsequence(consData: any): Promise<any> {
   const newCons = {
     ...consData,
     id: nextId,
+    status: consData.status || 'ACTIVE',
     created_at: new Date().toISOString()
   };
 
@@ -318,9 +319,84 @@ export async function createConsequence(consData: any): Promise<any> {
   return newCons;
 }
 
+export async function updateConsequence(id: number, updates: any): Promise<void> {
+  await fbFetch(`consequences/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates)
+  });
+}
+
 export async function deleteConsequence(id: number): Promise<void> {
   await fbFetch(`consequences/${id}`, {
     method: 'DELETE'
+  });
+}
+
+// --- FLIGHT LOGS ---
+export async function getFlightLogsList(): Promise<any[]> {
+  const data = await fbFetch('flight_logs');
+  if (!data) return [];
+  const list = Object.values(data).filter(Boolean) as any[];
+  return deduplicateById(list);
+}
+
+export async function createFlightLog(logData: any): Promise<any> {
+  const list = await getFlightLogsList();
+  const nextId = list.length > 0 ? Math.max(...list.map((l) => Number(l.id) || 0)) + 1 : 1;
+
+  const newLog = {
+    ...logData,
+    id: nextId,
+    status: 'PENDING',
+    created_at: new Date().toISOString()
+  };
+
+  await fbFetch(`flight_logs/${nextId}`, {
+    method: 'PUT',
+    body: JSON.stringify(newLog)
+  });
+
+  return newLog;
+}
+
+export async function updateFlightLog(id: number, updates: any): Promise<void> {
+  await fbFetch(`flight_logs/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates)
+  });
+}
+
+// --- DETENTIONS ---
+export async function getDetentionSessionsList(): Promise<any[]> {
+  const data = await fbFetch('detentions');
+  if (!data) return [];
+  const list = Object.values(data).filter(Boolean) as any[];
+  return deduplicateById(list);
+}
+
+export async function createDetentionSession(sessionData: any): Promise<any> {
+  const list = await getDetentionSessionsList();
+  const nextId = list.length > 0 ? Math.max(...list.map((s) => Number(s.id) || 0)) + 1 : 1;
+
+  const newSession = {
+    ...sessionData,
+    id: nextId,
+    entries: sessionData.entries || [],
+    created_at: new Date().toISOString()
+  };
+
+  await fbFetch(`detentions/${nextId}`, {
+    method: 'PUT',
+    body: JSON.stringify(newSession)
+  });
+
+  return newSession;
+}
+
+export async function updateDetentionSession(id: number, updates: any): Promise<void> {
+  await fbFetch(`detentions/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates)
   });
 }
 

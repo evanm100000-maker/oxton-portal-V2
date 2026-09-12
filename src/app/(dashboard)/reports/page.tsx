@@ -2,9 +2,13 @@
 
 import React, { useEffect, useState } from 'react';
 import { Flag, UserX, Bug, HelpCircle, PlusCircle, CheckCircle2, Clock } from 'lucide-react';
+import { database } from '@/lib/firebase';
+import { ref, onValue } from 'firebase/database';
+import { parseFirebaseSnapshot } from '@/lib/realtime-sync';
 
 export default function ReportsPage() {
   const [reports, setReports] = useState<any[]>([]);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
 
@@ -15,21 +19,21 @@ export default function ReportsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const fetchReports = () => {
-    fetch(`/api/reports?t=${Date.now()}`, { cache: 'no-store' })
+  useEffect(() => {
+    fetch(`/api/auth/me?t=${Date.now()}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
-        if (data.reports) {
-          const uniqueMap = new Map();
-          data.reports.forEach((r: any) => uniqueMap.set(String(r.id), r));
-          setReports(Array.from(uniqueMap.values()));
-        }
-        setLoading(false);
+        if (data.user) setCurrentUser(data.user);
       });
-  };
 
-  useEffect(() => {
-    fetchReports();
+    const unsub = onValue(ref(database, 'reports'), (snap) => {
+      const list = parseFirebaseSnapshot(snap);
+      list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      setReports(list);
+      setLoading(false);
+    });
+
+    return () => unsub();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -63,7 +67,6 @@ export default function ReportsPage() {
       setDescription('');
       setTargetUsername('');
       setShowModal(false);
-      fetchReports();
     } catch (err: any) {
       setMsg(`Error: ${err.message}`);
     } finally {

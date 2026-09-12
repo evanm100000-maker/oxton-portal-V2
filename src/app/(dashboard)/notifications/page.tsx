@@ -2,23 +2,39 @@
 
 import React, { useEffect, useState } from 'react';
 import { Bell, CheckCircle2, AlertTriangle, Info, ShieldAlert } from 'lucide-react';
+import { database } from '@/lib/firebase';
+import { ref, onValue } from 'firebase/database';
+import { parseFirebaseSnapshot } from '@/lib/realtime-sync';
 
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchNotifications = () => {
-    fetch('/api/notifications')
+  useEffect(() => {
+    fetch('/api/auth/me')
       .then((res) => res.json())
       .then((data) => {
-        if (data.notifications) setNotifications(data.notifications);
-        setLoading(false);
+        if (data.user) setUser(data.user);
       });
-  };
 
-  useEffect(() => {
-    fetchNotifications();
-  }, []);
+    const notifRef = ref(database, 'notifications');
+    const unsubscribe = onValue(notifRef, (snapshot) => {
+      const list = parseFirebaseSnapshot(snapshot);
+      if (user) {
+        const userNotifs = list
+          .filter((n: any) => Number(n.user_id) === Number(user.id))
+          .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setNotifications(userNotifs);
+      } else {
+        list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setNotifications(list);
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [user?.id]);
 
   const markAllRead = async () => {
     await fetch('/api/notifications', {
@@ -26,7 +42,6 @@ export default function NotificationsPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mark_all: true }),
     });
-    fetchNotifications();
   };
 
   return (

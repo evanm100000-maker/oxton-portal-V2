@@ -108,9 +108,44 @@ function initSchema(db: DatabaseSync) {
       user_id INTEGER NOT NULL,
       issuer_id INTEGER NOT NULL,
       type TEXT NOT NULL,
+      tier TEXT NOT NULL DEFAULT 'C1',
       reason TEXT NOT NULL,
       notes TEXT,
+      timeframe_deadline TEXT,
+      status TEXT NOT NULL DEFAULT 'ACTIVE',
       expires_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS flight_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      flight_id INTEGER NOT NULL,
+      flight_code TEXT NOT NULL,
+      flight_date TEXT NOT NULL,
+      role_flown TEXT NOT NULL,
+      proof_notes TEXT,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      admin_notes TEXT,
+      reviewed_by INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS detention_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_date TEXT NOT NULL,
+      created_by INTEGER NOT NULL,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS detention_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      consequence_id INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PASSED',
+      notes TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -154,6 +189,18 @@ function initSchema(db: DatabaseSync) {
 
   try {
     db.exec(`ALTER TABLE consequences ADD COLUMN expires_at DATETIME;`);
+  } catch (e) {}
+
+  try {
+    db.exec(`ALTER TABLE consequences ADD COLUMN tier TEXT DEFAULT 'C1';`);
+  } catch (e) {}
+
+  try {
+    db.exec(`ALTER TABLE consequences ADD COLUMN timeframe_deadline TEXT;`);
+  } catch (e) {}
+
+  try {
+    db.exec(`ALTER TABLE consequences ADD COLUMN status TEXT DEFAULT 'ACTIVE';`);
   } catch (e) {}
 
   // Initial maintenance setting if missing

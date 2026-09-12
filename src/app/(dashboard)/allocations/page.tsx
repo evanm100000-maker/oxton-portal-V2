@@ -94,14 +94,18 @@ export default function AllocationsPage() {
     setSelectedRegisterFlight(flight);
     const initialMap: Record<number, 'PRESENT' | 'LATE' | 'ABSENT'> = {};
 
-    activeStaff.forEach((s) => {
+    // Filter staff members who marked ATTENDING (coming) or already have a saved register status
+    const registerStaff = activeStaff.filter((s) => {
+      const existingAlloc = flight.allocations?.find((a: any) => Number(a.user_id) === Number(s.id));
+      return existingAlloc && (existingAlloc.status === 'ATTENDING' || (existingAlloc.attendance_status && existingAlloc.attendance_status !== 'NONE'));
+    });
+
+    registerStaff.forEach((s) => {
       const existingAlloc = flight.allocations?.find((a: any) => Number(a.user_id) === Number(s.id));
       if (existingAlloc && existingAlloc.attendance_status && existingAlloc.attendance_status !== 'NONE') {
         initialMap[s.id] = existingAlloc.attendance_status;
-      } else if (existingAlloc && existingAlloc.status === 'ATTENDING') {
-        initialMap[s.id] = 'PRESENT';
       } else {
-        initialMap[s.id] = 'ABSENT';
+        initialMap[s.id] = 'PRESENT';
       }
     });
 
@@ -329,55 +333,71 @@ export default function AllocationsPage() {
             )}
 
             <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-              {activeStaff.map((u) => {
-                const currentStatus = attendanceMap[u.id] || 'ABSENT';
-                return (
-                  <div key={u.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-purple-50/40 rounded-xl border border-purple-100 gap-2">
-                    <div>
-                      <div className="font-bold text-slate-800 text-xs">{u.preferred_name} (@{u.roblox_username})</div>
-                      <div className="text-slate-500 text-[10px]">{u.role}</div>
+              {(() => {
+                const attendingStaff = activeStaff.filter((s) => {
+                  const existingAlloc = selectedRegisterFlight?.allocations?.find((a: any) => Number(a.user_id) === Number(s.id));
+                  return existingAlloc && (existingAlloc.status === 'ATTENDING' || (existingAlloc.attendance_status && existingAlloc.attendance_status !== 'NONE'));
+                });
+
+                if (attendingStaff.length === 0) {
+                  return (
+                    <div className="p-8 text-center text-slate-400 space-y-1">
+                      <p className="font-bold text-slate-700 text-sm">No Staff Members Marked Attending</p>
+                      <p className="text-xs">Only staff members who mark "ATTENDING" (coming) on this flight appear in the register.</p>
                     </div>
+                  );
+                }
 
-                    <div className="flex items-center gap-1 text-xs">
-                      <button
-                        type="button"
-                        onClick={() => setAttendanceMap({ ...attendanceMap, [u.id]: 'PRESENT' })}
-                        className={`px-3 py-1.5 rounded-lg font-bold text-[11px] transition-all ${
-                          currentStatus === 'PRESENT'
-                            ? 'bg-emerald-600 text-white shadow-sm'
-                            : 'bg-white text-slate-600 hover:bg-emerald-50 border border-slate-200'
-                        }`}
-                      >
-                        Present
-                      </button>
+                return attendingStaff.map((u) => {
+                  const currentStatus = attendanceMap[u.id] || 'PRESENT';
+                  return (
+                    <div key={u.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-purple-50/40 rounded-xl border border-purple-100 gap-2">
+                      <div>
+                        <div className="font-bold text-slate-800 text-xs">{u.preferred_name} (@{u.roblox_username})</div>
+                        <div className="text-slate-500 text-[10px]">{u.role}</div>
+                      </div>
 
-                      <button
-                        type="button"
-                        onClick={() => setAttendanceMap({ ...attendanceMap, [u.id]: 'LATE' })}
-                        className={`px-3 py-1.5 rounded-lg font-bold text-[11px] transition-all ${
-                          currentStatus === 'LATE'
-                            ? 'bg-amber-500 text-white shadow-sm'
-                            : 'bg-white text-slate-600 hover:bg-amber-50 border border-slate-200'
-                        }`}
-                      >
-                        Late
-                      </button>
+                      <div className="flex items-center gap-1 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setAttendanceMap({ ...attendanceMap, [u.id]: 'PRESENT' })}
+                          className={`px-3 py-1.5 rounded-lg font-bold text-[11px] transition-all ${
+                            currentStatus === 'PRESENT'
+                              ? 'bg-emerald-600 text-white shadow-sm'
+                              : 'bg-white text-slate-600 hover:bg-emerald-50 border border-slate-200'
+                          }`}
+                        >
+                          Present
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() => setAttendanceMap({ ...attendanceMap, [u.id]: 'ABSENT' })}
-                        className={`px-3 py-1.5 rounded-lg font-bold text-[11px] transition-all ${
-                          currentStatus === 'ABSENT'
-                            ? 'bg-rose-600 text-white shadow-sm'
-                            : 'bg-white text-slate-600 hover:bg-rose-50 border border-slate-200'
-                        }`}
-                      >
-                        Absent
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => setAttendanceMap({ ...attendanceMap, [u.id]: 'LATE' })}
+                          className={`px-3 py-1.5 rounded-lg font-bold text-[11px] transition-all ${
+                            currentStatus === 'LATE'
+                              ? 'bg-amber-500 text-white shadow-sm'
+                              : 'bg-white text-slate-600 hover:bg-amber-50 border border-slate-200'
+                          }`}
+                        >
+                          Late
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setAttendanceMap({ ...attendanceMap, [u.id]: 'ABSENT' })}
+                          className={`px-3 py-1.5 rounded-lg font-bold text-[11px] transition-all ${
+                            currentStatus === 'ABSENT'
+                              ? 'bg-rose-600 text-white shadow-sm'
+                              : 'bg-white text-slate-600 hover:bg-rose-50 border border-slate-200'
+                          }`}
+                        >
+                          Absent
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </div>
 
             <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3">

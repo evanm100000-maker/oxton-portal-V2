@@ -2,9 +2,13 @@
 
 import React, { useEffect, useState } from 'react';
 import { Clock, Calendar, ShieldCheck, AlertCircle, PlusCircle, CheckCircle2, XCircle } from 'lucide-react';
+import { database } from '@/lib/firebase';
+import { ref, onValue } from 'firebase/database';
+import { parseFirebaseSnapshot } from '@/lib/realtime-sync';
 
 export default function LoaPage() {
   const [requests, setRequests] = useState<any[]>([]);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
 
@@ -15,17 +19,21 @@ export default function LoaPage() {
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const fetchRequests = () => {
-    fetch('/api/loa')
+  useEffect(() => {
+    fetch(`/api/auth/me?t=${Date.now()}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
-        if (data.requests) setRequests(data.requests);
-        setLoading(false);
+        if (data.user) setCurrentUser(data.user);
       });
-  };
 
-  useEffect(() => {
-    fetchRequests();
+    const unsub = onValue(ref(database, 'loa_requests'), (snap) => {
+      const list = parseFirebaseSnapshot(snap);
+      list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      setRequests(list);
+      setLoading(false);
+    });
+
+    return () => unsub();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -48,7 +56,6 @@ export default function LoaPage() {
       setStartDate('');
       setEndDate('');
       setShowModal(false);
-      fetchRequests();
     } catch (err: any) {
       setMsg(`Error: ${err.message}`);
     } finally {

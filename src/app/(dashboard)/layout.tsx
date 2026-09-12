@@ -19,10 +19,12 @@ import {
   Wrench,
   CheckCircle2,
   AlertOctagon,
-  Settings
+  Settings,
+  FileText
 } from 'lucide-react';
 import { database } from '@/lib/firebase';
 import { ref, onValue } from 'firebase/database';
+import { parseFirebaseSnapshot } from '@/lib/realtime-sync';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -104,9 +106,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     if (user && !suspension) {
-      fetchNotifications();
-      const interval = setInterval(fetchNotifications, 4000);
-      return () => clearInterval(interval);
+      const notifRef = ref(database, 'notifications');
+      const unsubNotif = onValue(notifRef, (snapshot) => {
+        const list = parseFirebaseSnapshot(snapshot);
+        const userNotifs = list
+          .filter((n: any) => Number(n.user_id) === Number(user.id))
+          .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setNotifications(userNotifs);
+        setUnreadCount(userNotifs.filter((n: any) => !n.is_read).length);
+      });
+      return () => unsubNotif();
     }
   }, [user, suspension]);
 
@@ -134,7 +143,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       body: JSON.stringify({ mark_all: true }),
     });
     setUnreadCount(0);
-    fetchNotifications();
   };
 
   if (loading) {
@@ -214,6 +222,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const navItems = [
     { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { label: 'Allocations', href: '/allocations', icon: CalendarDays },
+    { label: 'Flight Logs', href: '/flight-logs', icon: FileText },
     { label: 'Staff Directory', href: '/staff', icon: Users },
     { label: 'LOA / Reduced', href: '/loa', icon: Clock },
     { label: 'Reports', href: '/reports', icon: Flag },
