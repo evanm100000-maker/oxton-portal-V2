@@ -84,11 +84,27 @@ export default function AdminPanelPage() {
   const [consDays, setConsDays] = useState('2');
   const [isSubmittingCons, setIsSubmittingCons] = useState(false);
 
-  // Detention session creation state
+  // Detention session creation & live timer state
   const [detentionDate, setDetentionDate] = useState(new Date().toISOString().split('T')[0]);
   const [detentionNotes, setDetentionNotes] = useState('');
+  const [selectedSittingIds, setSelectedSittingIds] = useState<number[]>([]);
+  const [detentionAttendanceMap, setDetentionAttendanceMap] = useState<Record<number, 'PRESENT' | 'ABSENT'>>({});
   const [detentionRegisterMap, setDetentionRegisterMap] = useState<Record<number, 'PASSED' | 'FAILED'>>({});
+  const [isSessionActive, setIsSessionActive] = useState(false);
+  const [sessionTimerSeconds, setSessionTimerSeconds] = useState(0);
   const [detentionSubmitting, setDetentionSubmitting] = useState(false);
+
+  useEffect(() => {
+    let interval: any = null;
+    if (isSessionActive) {
+      interval = setInterval(() => {
+        setSessionTimerSeconds((prev) => prev + 1);
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isSessionActive]);
 
   // Flight Log Review Modal State
   const [reviewingLog, setReviewingLog] = useState<any>(null);
@@ -338,20 +354,58 @@ export default function AdminPanelPage() {
     }
   };
 
-  // Detention Register Submit Handler
-  const handleCompleteDetentionRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setDetentionSubmitting(true);
+  const toggleSittingId = (consId: number) => {
+    setSelectedSittingIds((prev) =>
+      prev.includes(consId) ? prev.filter((id) => id !== consId) : [...prev, consId]
+    );
+  };
 
+  const selectAllSitting = () => {
     const pendingC4s = consequences.filter(
       (c) => (c.tier === 'C4A' || c.tier === 'C4B' || c.type === 'C4A' || c.type === 'C4B') && (c.status === 'ACTIVE' || !c.status)
     );
+    if (selectedSittingIds.length === pendingC4s.length) {
+      setSelectedSittingIds([]);
+    } else {
+      setSelectedSittingIds(pendingC4s.map((c) => c.id));
+    }
+  };
 
-    const entries = pendingC4s.map((c) => ({
-      user_id: c.user_id,
-      consequence_id: c.id,
-      status: detentionRegisterMap[c.id] || 'PASSED',
-    }));
+  const formatTimer = (totalSec: number) => {
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  // Detention Register Submit Handler
+  const handleCompleteDetentionRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedSittingIds.length === 0) {
+      alert('Please select at least one staff member sitting detention today.');
+      return;
+    }
+
+    setDetentionSubmitting(true);
+
+    const sittingCons = consequences.filter((c) => selectedSittingIds.includes(c.id));
+
+    const entries = sittingCons.map((c) => {
+      const attendance = detentionAttendanceMap[c.id] || 'PRESENT';
+      if (attendance === 'ABSENT') {
+        return {
+          user_id: c.user_id,
+          consequence_id: c.id,
+          status: 'FAILED',
+          notes: 'Marked ABSENT for detention session',
+        };
+      }
+      return {
+        user_id: c.user_id,
+        consequence_id: c.id,
+        status: detentionRegisterMap[c.id] || 'PASSED',
+        notes: `Session timer: ${formatTimer(sessionTimerSeconds)}`,
+      };
+    });
 
     try {
       const res = await fetch('/api/detentions', {
@@ -364,9 +418,15 @@ export default function AdminPanelPage() {
         }),
       });
 
+      const data = await res.json();
       if (res.ok) {
-        setFeedback('Daily detention session register submitted! Passed detentions cleared, failed C4As escalated to C4B.');
+        setFeedback('Daily detention session register submitted & saved successfully! Consequence statuses updated.');
         setDetentionNotes('');
+        setIsSessionActive(false);
+        setSessionTimerSeconds(0);
+        setSelectedSittingIds([]);
+      } else {
+        alert(`Error saving detention session: ${data.error || 'Unknown error'}`);
       }
     } catch (err: any) {
       alert(`Detention submit error: ${err.message}`);
@@ -776,19 +836,43 @@ export default function AdminPanelPage() {
       {/* TAB 3: DETENTION LOG & REGISTER */}
       {activeTab === 'DETENTIONS' && (
         <div className="space-y-6">
-          <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4">
-            <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+          <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-6">
+            <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                  <Clock className="w-5 h-5 text-purple-600" /> Daily Detention Session & Register Log
+                  <Clock className="w-5 h-5 text-purple-600" /> Live Detention Session & Timer Register
                 </h3>
-                <p className="text-xs text-slate-500">
-                  Admins can run a detention register for users with active C4s. Marking **PASS** clears the C4 from upcoming sanctions. Marking **FAIL** automatically escalates C4A to C4B (30 min detention).
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Select sitting staff &rarr; Take register (Present/Absent) &rarr; Run live timer (20m C4A / 30m C4B) &rarr; Mark PASS/FAIL. Failed C4Bs escalate to C5A (2 Day Suspension).
                 </p>
+              </div>
+
+              {/* Live Timer Control Bar */}
+              <div className="flex items-center gap-2 bg-purple-50 p-2.5 rounded-2xl border border-purple-200">
+                <div className="px-3 py-1 bg-slate-900 text-white font-mono font-black text-sm rounded-xl tracking-wider shadow-inner">
+                  ⏱️ {formatTimer(sessionTimerSeconds)}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsSessionActive(!isSessionActive)}
+                  className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all ${
+                    isSessionActive ? 'bg-amber-500 text-white shadow-sm' : 'bg-emerald-600 text-white shadow-sm'
+                  }`}
+                >
+                  {isSessionActive ? '⏸ Pause Timer' : '▶ Start Live Timer'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSessionTimerSeconds(0)}
+                  className="px-2.5 py-1.5 bg-white text-slate-600 hover:bg-slate-100 font-bold rounded-xl text-xs border border-slate-200"
+                >
+                  ↺ Reset
+                </button>
               </div>
             </div>
 
-            <form onSubmit={handleCompleteDetentionRegister} className="space-y-4 text-xs font-medium">
+            <form onSubmit={handleCompleteDetentionRegister} className="space-y-6 text-xs font-medium">
+              {/* Session Meta Information */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Detention Session Date</label>
@@ -797,66 +881,79 @@ export default function AdminPanelPage() {
                     required
                     value={detentionDate}
                     onChange={(e) => setDetentionDate(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">Session Notes (Optional)</label>
+                  <label className="block text-slate-700 font-bold mb-1">Session Supervisor / Notes</label>
                   <input
                     type="text"
                     value={detentionNotes}
                     onChange={(e) => setDetentionNotes(e.target.value)}
-                    placeholder="e.g. Conducted by Capt. Alex"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                    placeholder="e.g. Executive Management / Session Lead"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800"
                   />
                 </div>
               </div>
 
-              <div>
-                <h4 className="font-bold text-slate-800 text-sm mb-2">Staff Members with Active C4 Detentions ({pendingC4s.length})</h4>
+              {/* STEP 1: SITTING SELECTION */}
+              <div className="space-y-3 bg-purple-50/40 p-4 rounded-2xl border border-purple-100">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-extrabold text-slate-800 text-sm">
+                      Step 1: Select Staff Members Sitting Today ({selectedSittingIds.length} / {pendingC4s.length} Selected)
+                    </h4>
+                    <p className="text-[11px] text-slate-500">Check staff members who are sitting in today's detention session.</p>
+                  </div>
+                  {pendingC4s.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={selectAllSitting}
+                      className="px-3 py-1 bg-white hover:bg-purple-100 text-purple-700 font-bold rounded-xl border border-purple-200 text-xs transition-all"
+                    >
+                      {selectedSittingIds.length === pendingC4s.length ? 'Deselect All' : 'Select All'}
+                    </button>
+                  )}
+                </div>
+
                 {pendingC4s.length === 0 ? (
-                  <p className="text-slate-400 italic py-4">No staff members currently have pending C4 detentions.</p>
+                  <p className="text-slate-400 italic py-3 text-center">No staff members currently have active C4 detentions.</p>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     {pendingC4s.map((c) => {
                       const u = activeStaff.find((usr) => Number(usr.id) === Number(c.user_id));
-                      const currentRes = detentionRegisterMap[c.id] || 'PASSED';
+                      const isSelected = selectedSittingIds.includes(c.id);
                       return (
-                        <div key={c.id} className="p-3.5 bg-purple-50/50 rounded-2xl border border-purple-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                          <div>
-                            <div className="font-bold text-slate-800 text-xs">
-                              {u?.preferred_name || 'Staff'} (@{u?.roblox_username || 'Staff'})
-                            </div>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <span className="px-2 py-0.5 bg-purple-100 text-purple-800 font-black rounded text-[10px]">
-                                {c.tier || c.type}
-                              </span>
-                              <span className="text-slate-600 text-[11px]">{c.reason}</span>
+                        <div
+                          key={c.id}
+                          onClick={() => toggleSittingId(c.id)}
+                          className={`p-3 rounded-xl border cursor-pointer flex items-center justify-between transition-all ${
+                            isSelected
+                              ? 'bg-purple-100/80 border-purple-300 shadow-sm'
+                              : 'bg-white border-slate-200 hover:bg-purple-50/50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {}}
+                              className="w-4 h-4 text-purple-600 rounded border-slate-300"
+                            />
+                            <div>
+                              <div className="font-bold text-slate-800 text-xs">
+                                {u?.preferred_name || 'Staff'} (@{u?.roblox_username || 'Staff'})
+                              </div>
+                              <div className="text-[10px] text-slate-500">{c.reason}</div>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setDetentionRegisterMap({ ...detentionRegisterMap, [c.id]: 'PASSED' })}
-                              className={`px-4 py-2 rounded-xl font-bold text-xs transition-all ${
-                                currentRes === 'PASSED' ? 'bg-emerald-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200'
-                              }`}
-                            >
-                              ✓ PASS (Clear C4)
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => setDetentionRegisterMap({ ...detentionRegisterMap, [c.id]: 'FAILED' })}
-                              className={`px-4 py-2 rounded-xl font-bold text-xs transition-all ${
-                                currentRes === 'FAILED' ? 'bg-rose-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200'
-                              }`}
-                            >
-                              ✕ FAIL (Escalate C4A to C4B)
-                            </button>
-                          </div>
+                          <span className={`px-2 py-0.5 font-black rounded text-[10px] uppercase ${
+                            c.tier === 'C4B' || c.type === 'C4B' ? 'bg-indigo-100 text-indigo-800' : 'bg-purple-100 text-purple-800'
+                          }`}>
+                            {c.tier || c.type}
+                          </span>
                         </div>
                       );
                     })}
@@ -864,15 +961,156 @@ export default function AdminPanelPage() {
                 )}
               </div>
 
-              {pendingC4s.length > 0 && (
-                <div className="flex justify-end pt-2">
-                  <button
-                    type="submit"
-                    disabled={detentionSubmitting}
-                    className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
-                  >
-                    {detentionSubmitting ? 'Saving...' : 'Submit Detention Register'}
-                  </button>
+              {/* STEP 2 & 3: ATTENDANCE & LIVE EVALUATION */}
+              {selectedSittingIds.length > 0 && (
+                <div className="space-y-4">
+                  {/* Quick Fast-Forward Controls for Admins */}
+                  <div className="flex items-center justify-between bg-slate-900 text-white p-3 rounded-2xl">
+                    <div className="flex items-center gap-2 text-xs font-bold">
+                      <Clock className="w-4 h-4 text-amber-400" />
+                      <span>Live Timer Controls & Fast-Forward Thresholds</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSessionTimerSeconds(1200); // 20m
+                          setIsSessionActive(true);
+                        }}
+                        className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white font-bold text-[11px] rounded-xl shadow-sm"
+                      >
+                        ⏩ Skip to 20 Min (Unlock C4A)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSessionTimerSeconds(1800); // 30m
+                          setIsSessionActive(true);
+                        }}
+                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] rounded-xl shadow-sm"
+                      >
+                        ⏩ Skip to 30 Min (Unlock C4B)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Sitting Staff Evaluation List */}
+                  <div className="space-y-3">
+                    <h4 className="font-extrabold text-slate-800 text-sm">
+                      Step 2: Attendance & Live Timer Evaluation ({selectedSittingIds.length} Sitting)
+                    </h4>
+
+                    {selectedSittingIds.map((consId) => {
+                      const c = consequences.find((item) => item.id === consId);
+                      if (!c) return null;
+                      const u = activeStaff.find((usr) => Number(usr.id) === Number(c.user_id));
+                      const isC4B = c.tier === 'C4B' || c.type === 'C4B';
+
+                      const attendance = detentionAttendanceMap[c.id] || 'PRESENT';
+                      const currentEval = detentionRegisterMap[c.id] || 'PASSED';
+
+                      const isUnlocked = isC4B ? sessionTimerSeconds >= 1800 : sessionTimerSeconds >= 1200;
+                      const requiredMinutes = isC4B ? 30 : 20;
+
+                      return (
+                        <div key={c.id} className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className={`px-2.5 py-0.5 font-extrabold text-xs rounded-full ${
+                                  isC4B ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' : 'bg-purple-100 text-purple-800 border border-purple-200'
+                                }`}>
+                                  {c.tier || c.type} ({requiredMinutes} Min)
+                                </span>
+                                <span className="font-bold text-slate-800 text-sm">
+                                  {u?.preferred_name || 'Staff'} (@{u?.roblox_username || 'Staff'})
+                                </span>
+                              </div>
+                              <p className="text-slate-500 text-xs mt-0.5">{c.reason}</p>
+                            </div>
+
+                            {/* Attendance Toggle (Present / Absent) */}
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setDetentionAttendanceMap({ ...detentionAttendanceMap, [c.id]: 'PRESENT' })}
+                                className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all ${
+                                  attendance === 'PRESENT' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                }`}
+                              >
+                                Present
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDetentionAttendanceMap({ ...detentionAttendanceMap, [c.id]: 'ABSENT' })}
+                                className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all ${
+                                  attendance === 'ABSENT' ? 'bg-rose-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                }`}
+                              >
+                                Absent
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Live Timer Evaluation Controls */}
+                          {attendance === 'ABSENT' ? (
+                            <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs font-bold">
+                              ✕ Marked ABSENT: Will automatically fail session and escalate ({isC4B ? 'C4B to C5A 2-Day Suspension' : 'C4A to C4B'}).
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
+                              <div className="text-xs">
+                                {isUnlocked ? (
+                                  <span className="text-emerald-700 font-extrabold flex items-center gap-1">
+                                    ✓ {requiredMinutes}-Minute Threshold Reached — Unlocked for Evaluation
+                                  </span>
+                                ) : (
+                                  <span className="text-amber-700 font-semibold flex items-center gap-1">
+                                    ⏳ Unlocks at {requiredMinutes}:00 mark (Currently {formatTimer(sessionTimerSeconds)})
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  disabled={!isUnlocked}
+                                  onClick={() => setDetentionRegisterMap({ ...detentionRegisterMap, [c.id]: 'PASSED' })}
+                                  className={`px-4 py-2 rounded-xl font-bold text-xs transition-all disabled:opacity-40 ${
+                                    currentEval === 'PASSED' ? 'bg-emerald-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200'
+                                  }`}
+                                >
+                                  ✓ PASS (Clear {c.tier || c.type})
+                                </button>
+
+                                <button
+                                  type="button"
+                                  disabled={!isUnlocked}
+                                  onClick={() => setDetentionRegisterMap({ ...detentionRegisterMap, [c.id]: 'FAILED' })}
+                                  className={`px-4 py-2 rounded-xl font-bold text-xs transition-all disabled:opacity-40 ${
+                                    currentEval === 'FAILED' ? 'bg-rose-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200'
+                                  }`}
+                                >
+                                  ✕ FAIL ({isC4B ? 'Escalate to C5A 2-Day Suspension' : 'Escalate to C4B'})
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Final Submit Button */}
+                  <div className="flex justify-end pt-3">
+                    <button
+                      type="submit"
+                      disabled={detentionSubmitting}
+                      className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50 text-sm"
+                    >
+                      {detentionSubmitting ? 'Saving Detention Register...' : 'Submit & Save Detention Register'}
+                    </button>
+                  </div>
                 </div>
               )}
             </form>

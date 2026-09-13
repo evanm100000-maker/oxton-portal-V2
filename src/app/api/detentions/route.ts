@@ -1,24 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getDetentionSessionsList, createDetentionSession, getConsequencesList, updateConsequence, createNotification, createConsequence } from '@/lib/firebase-db';
-import jwt from 'jsonwebtoken';
-import { cookies } from 'next/headers';
+import { getCurrentUser } from '@/lib/auth';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'luma-staff-portal-secret-key-2024';
-
-async function getUserFromToken() {
-  const token = cookies().get('auth_token')?.value;
-  if (!token) return null;
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
-    return decoded;
-  } catch (err) {
-    return null;
-  }
-}
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export async function GET() {
-  const user = await getUserFromToken();
+  const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -39,7 +28,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const user = await getUserFromToken();
+  const user = await getCurrentUser();
   if (!user || (user.role !== 'ADMIN' && user.role !== 'FOUNDER')) {
     return NextResponse.json({ error: 'Unauthorized. Executive access required.' }, { status: 403 });
   }
@@ -55,13 +44,22 @@ export async function POST(req: Request) {
     const sessionData = {
       session_date,
       created_by: user.id,
-      created_by_name: user.preferred_name,
+      created_by_name: user.preferred_name || 'Admin',
       notes: notes || '',
       entries,
       created_at: new Date().toISOString(),
     };
 
     const newSession = await createDetentionSession(sessionData);
+
+    // Also record into SQLite if database available
+    try {
+      const db = getDb();
+      db.prepare(`
+        INSERT INTO detention_sessions (session_date, created_by, notes, entries_json)
+        VALUES (?, ?, ?, ?)
+      `).run(session_date, user.id, notes || '', JSON.stringify(entries));
+    } catch (e) {}
 
     const consequences = await getConsequencesList();
 
@@ -123,15 +121,37 @@ export async function POST(req: Request) {
               'WARNING'
             );
           } else {
-            // Already C4B -> Record failure note
+            // C4B FAILED -> Escalate to C5A (2 Day Suspension)
+            const exp = new Date();
+            exp.setDate(exp.getDate() + 2); // 2 days suspension
+
             await updateConsequence(targetCons.id, {
-              notes: (targetCons.notes || '') + ` | Failed C4B detention on ${session_date}.`,
+              tier: 'C5A',
+              type: 'SUSPENSION',
+              reason: `${targetCons.reason} (Escalated to C5A 2-Day Suspension due to failed/missed C4B detention on ${session_date})`,
+              escalated_at: new Date().toISOString(),
+              expires_at: exp.toISOString(),
+              notes: (targetCons.notes || '') + ` | Failed C4B detention on ${session_date}. Escalated to C5A (2 Day Suspension).`,
             });
+
+            // SQLite update
+            try {
+              const db = getDb();
+              db.prepare(`
+                UPDATE consequences
+                SET tier = 'C5A', type = 'SUSPENSION', reason = ?, expires_at = ?
+                WHERE id = ?
+              `).run(
+                `${targetCons.reason} (Escalated to C5A 2-Day Suspension due to failed/missed C4B detention on ${session_date})`,
+                exp.toISOString(),
+                targetCons.id
+              );
+            } catch (e) {}
 
             await createNotification(
               entry.user_id,
-              'Detention Failed (C4B)',
-              `You failed/missed your C4B detention on ${session_date}. Please contact Executive Management immediately.`,
+              'Detention Failed - C5A 2-Day Suspension Issued',
+              `You failed/missed your C4B detention session on ${session_date}. You have been issued a C5A (2 Day Suspension).`,
               'WARNING'
             );
           }
@@ -139,8 +159,8 @@ export async function POST(req: Request) {
       }
     }
 
-    return NextResponse.json({ success: true, session: newSession });
+    return NextResponse.json({ success: true, session: newSession }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err.message || 'Failed to submit detention session' }, { status: 500 });
   }
 }
