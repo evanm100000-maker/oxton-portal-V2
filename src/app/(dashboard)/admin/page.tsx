@@ -85,6 +85,7 @@ export default function AdminPanelPage() {
   const [isSubmittingCons, setIsSubmittingCons] = useState(false);
 
   // Detention session creation & live timer state
+  const [detentionStage, setDetentionStage] = useState<'REGISTER' | 'COUNTDOWN'>('REGISTER');
   const [detentionDate, setDetentionDate] = useState(new Date().toISOString().split('T')[0]);
   const [detentionNotes, setDetentionNotes] = useState('');
   const [selectedSittingIds, setSelectedSittingIds] = useState<number[]>([]);
@@ -425,6 +426,7 @@ export default function AdminPanelPage() {
         setIsSessionActive(false);
         setSessionTimerSeconds(0);
         setSelectedSittingIds([]);
+        setDetentionStage('REGISTER');
       } else {
         alert(`Error saving detention session: ${data.error || 'Unknown error'}`);
       }
@@ -837,159 +839,264 @@ export default function AdminPanelPage() {
       {activeTab === 'DETENTIONS' && (
         <div className="space-y-6">
           <div className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-6">
-            <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            {/* Stage Selector Pills */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                   <Clock className="w-5 h-5 text-purple-600" /> Live Detention Session & Timer Register
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Select sitting staff &rarr; Take register (Present/Absent) &rarr; Run live timer (20m C4A / 30m C4B) &rarr; Mark PASS/FAIL. Failed C4Bs escalate to C5A (2 Day Suspension).
+                  1. Mark attendance &rarr; 2. Run countdown clocks &rarr; 3. Evaluate Present staff at 20m/30m thresholds &rarr; Save register.
                 </p>
               </div>
 
-              {/* Live Timer Control Bar */}
-              <div className="flex items-center gap-2 bg-purple-50 p-2.5 rounded-2xl border border-purple-200">
-                <div className="px-3 py-1 bg-slate-900 text-white font-mono font-black text-sm rounded-xl tracking-wider shadow-inner">
-                  ⏱️ {formatTimer(sessionTimerSeconds)}
-                </div>
+              <div className="flex items-center bg-slate-100 p-1 rounded-xl">
                 <button
                   type="button"
-                  onClick={() => setIsSessionActive(!isSessionActive)}
-                  className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all ${
-                    isSessionActive ? 'bg-amber-500 text-white shadow-sm' : 'bg-emerald-600 text-white shadow-sm'
+                  onClick={() => setDetentionStage('REGISTER')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    detentionStage === 'REGISTER' ? 'bg-white text-purple-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
                   }`}
                 >
-                  {isSessionActive ? '⏸ Pause Timer' : '▶ Start Live Timer'}
+                  1. Attendance Register
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSessionTimerSeconds(0)}
-                  className="px-2.5 py-1.5 bg-white text-slate-600 hover:bg-slate-100 font-bold rounded-xl text-xs border border-slate-200"
+                  onClick={() => {
+                    if (selectedSittingIds.length === 0) {
+                      alert('Please select at least one sitting staff member first.');
+                      return;
+                    }
+                    setDetentionStage('COUNTDOWN');
+                    setIsSessionActive(true);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    detentionStage === 'COUNTDOWN' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                  }`}
                 >
-                  ↺ Reset
+                  2. Live Countdown Screen ⏱️
                 </button>
               </div>
             </div>
 
             <form onSubmit={handleCompleteDetentionRegister} className="space-y-6 text-xs font-medium">
-              {/* Session Meta Information */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Detention Session Date</label>
-                  <input
-                    type="date"
-                    required
-                    value={detentionDate}
-                    onChange={(e) => setDetentionDate(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
-                  />
-                </div>
+              {/* STAGE 1: REGISTER */}
+              {detentionStage === 'REGISTER' && (
+                <div className="space-y-6">
+                  {/* Session Meta Information */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">Detention Session Date</label>
+                      <input
+                        type="date"
+                        required
+                        value={detentionDate}
+                        onChange={(e) => setDetentionDate(e.target.value)}
+                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-semibold text-slate-800"
+                      />
+                    </div>
 
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Session Supervisor / Notes</label>
-                  <input
-                    type="text"
-                    value={detentionNotes}
-                    onChange={(e) => setDetentionNotes(e.target.value)}
-                    placeholder="e.g. Executive Management / Session Lead"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800"
-                  />
-                </div>
-              </div>
-
-              {/* STEP 1: SITTING SELECTION */}
-              <div className="space-y-3 bg-purple-50/40 p-4 rounded-2xl border border-purple-100">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-extrabold text-slate-800 text-sm">
-                      Step 1: Select Staff Members Sitting Today ({selectedSittingIds.length} / {pendingC4s.length} Selected)
-                    </h4>
-                    <p className="text-[11px] text-slate-500">Check staff members who are sitting in today's detention session.</p>
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">Session Supervisor / Notes</label>
+                      <input
+                        type="text"
+                        value={detentionNotes}
+                        onChange={(e) => setDetentionNotes(e.target.value)}
+                        placeholder="e.g. Executive Management / Session Supervisor"
+                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-slate-800"
+                      />
+                    </div>
                   </div>
-                  {pendingC4s.length > 0 && (
+
+                  {/* Sitting Selection & Attendance Marking */}
+                  <div className="space-y-3 bg-purple-50/40 p-4 rounded-2xl border border-purple-100">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-extrabold text-slate-800 text-sm">
+                          Select Staff Sitting Today ({selectedSittingIds.length} / {pendingC4s.length} Selected)
+                        </h4>
+                        <p className="text-[11px] text-slate-500">Check staff members present/sitting today and mark their attendance status.</p>
+                      </div>
+                      {pendingC4s.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={selectAllSitting}
+                          className="px-3 py-1 bg-white hover:bg-purple-100 text-purple-700 font-bold rounded-xl border border-purple-200 text-xs transition-all"
+                        >
+                          {selectedSittingIds.length === pendingC4s.length ? 'Deselect All' : 'Select All'}
+                        </button>
+                      )}
+                    </div>
+
+                    {pendingC4s.length === 0 ? (
+                      <p className="text-slate-400 italic py-4 text-center">No staff members currently have active C4 detentions.</p>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {pendingC4s.map((c) => {
+                          const u = activeStaff.find((usr) => Number(usr.id) === Number(c.user_id));
+                          const isSelected = selectedSittingIds.includes(c.id);
+                          const attendance = detentionAttendanceMap[c.id] || 'PRESENT';
+
+                          return (
+                            <div
+                              key={c.id}
+                              className={`p-3.5 rounded-2xl border transition-all space-y-2 ${
+                                isSelected
+                                  ? 'bg-white border-purple-300 shadow-md ring-1 ring-purple-200'
+                                  : 'bg-white/60 border-slate-200 opacity-70 hover:opacity-100'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between cursor-pointer" onClick={() => toggleSittingId(c.id)}>
+                                <div className="flex items-center gap-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => {}}
+                                    className="w-4 h-4 text-purple-600 rounded border-slate-300"
+                                  />
+                                  <div>
+                                    <div className="font-bold text-slate-800 text-xs">
+                                      {u?.preferred_name || 'Staff'} (@{u?.roblox_username || 'Staff'})
+                                    </div>
+                                    <div className="text-[10px] text-slate-500">{c.reason}</div>
+                                  </div>
+                                </div>
+
+                                <span className={`px-2.5 py-0.5 font-extrabold rounded-full text-[10px] uppercase ${
+                                  c.tier === 'C4B' || c.type === 'C4B' ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' : 'bg-purple-100 text-purple-800 border border-purple-200'
+                                }`}>
+                                  {c.tier || c.type}
+                                </span>
+                              </div>
+
+                              {isSelected && (
+                                <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+                                  <span className="text-[11px] font-semibold text-slate-500">Attendance Status:</span>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => setDetentionAttendanceMap({ ...detentionAttendanceMap, [c.id]: 'PRESENT' })}
+                                      className={`px-3 py-1 rounded-lg font-bold text-[11px] transition-all ${
+                                        attendance === 'PRESENT' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                      }`}
+                                    >
+                                      Present
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setDetentionAttendanceMap({ ...detentionAttendanceMap, [c.id]: 'ABSENT' })}
+                                      className={`px-3 py-1 rounded-lg font-bold text-[11px] transition-all ${
+                                        attendance === 'ABSENT' ? 'bg-rose-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                      }`}
+                                    >
+                                      Absent
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end">
                     <button
                       type="button"
-                      onClick={selectAllSitting}
-                      className="px-3 py-1 bg-white hover:bg-purple-100 text-purple-700 font-bold rounded-xl border border-purple-200 text-xs transition-all"
+                      disabled={selectedSittingIds.length === 0}
+                      onClick={() => {
+                        setDetentionStage('COUNTDOWN');
+                        setIsSessionActive(true);
+                      }}
+                      className="px-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold rounded-xl shadow-md disabled:opacity-40 text-xs flex items-center gap-2"
                     >
-                      {selectedSittingIds.length === pendingC4s.length ? 'Deselect All' : 'Select All'}
+                      ▶ Proceed to Live Countdown Clocks ({selectedSittingIds.length} Sitting)
                     </button>
-                  )}
+                  </div>
                 </div>
+              )}
 
-                {pendingC4s.length === 0 ? (
-                  <p className="text-slate-400 italic py-3 text-center">No staff members currently have active C4 detentions.</p>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {pendingC4s.map((c) => {
-                      const u = activeStaff.find((usr) => Number(usr.id) === Number(c.user_id));
-                      const isSelected = selectedSittingIds.includes(c.id);
-                      return (
-                        <div
-                          key={c.id}
-                          onClick={() => toggleSittingId(c.id)}
-                          className={`p-3 rounded-xl border cursor-pointer flex items-center justify-between transition-all ${
-                            isSelected
-                              ? 'bg-purple-100/80 border-purple-300 shadow-sm'
-                              : 'bg-white border-slate-200 hover:bg-purple-50/50'
+              {/* STAGE 2: COUNTDOWN & EVALUATION */}
+              {detentionStage === 'COUNTDOWN' && (
+                <div className="space-y-6">
+                  {/* Countdown Timer Display Card */}
+                  <div className="bg-slate-900 text-white p-6 rounded-3xl shadow-xl space-y-4 border border-slate-800">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                      <div>
+                        <div className="text-xs text-purple-400 font-bold uppercase tracking-wider">Live Session Active</div>
+                        <h4 className="text-2xl font-black tracking-tight text-white flex items-center gap-2 mt-0.5">
+                          <Clock className="w-6 h-6 text-purple-400 animate-pulse" />
+                          {formatTimer(sessionTimerSeconds)}
+                        </h4>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => setIsSessionActive(!isSessionActive)}
+                          className={`px-4 py-2 rounded-xl font-bold text-xs transition-all shadow-sm ${
+                            isSessionActive ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'
                           }`}
                         >
-                          <div className="flex items-center gap-3">
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() => {}}
-                              className="w-4 h-4 text-purple-600 rounded border-slate-300"
-                            />
-                            <div>
-                              <div className="font-bold text-slate-800 text-xs">
-                                {u?.preferred_name || 'Staff'} (@{u?.roblox_username || 'Staff'})
-                              </div>
-                              <div className="text-[10px] text-slate-500">{c.reason}</div>
-                            </div>
-                          </div>
-
-                          <span className={`px-2 py-0.5 font-black rounded text-[10px] uppercase ${
-                            c.tier === 'C4B' || c.type === 'C4B' ? 'bg-indigo-100 text-indigo-800' : 'bg-purple-100 text-purple-800'
-                          }`}>
-                            {c.tier || c.type}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* STEP 2 & 3: ATTENDANCE & LIVE EVALUATION */}
-              {selectedSittingIds.length > 0 && (
-                <div className="space-y-4">
-                  {/* Quick Fast-Forward Controls for Admins */}
-                  <div className="flex items-center justify-between bg-slate-900 text-white p-3 rounded-2xl">
-                    <div className="flex items-center gap-2 text-xs font-bold">
-                      <Clock className="w-4 h-4 text-amber-400" />
-                      <span>Live Timer Controls & Fast-Forward Thresholds</span>
+                          {isSessionActive ? '⏸ Pause Timer' : '▶ Resume Timer'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSessionTimerSeconds(0)}
+                          className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs border border-slate-700"
+                        >
+                          ↺ Reset
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
+
+                    {/* Threshold Fast-Forward Controls */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                       <button
                         type="button"
                         onClick={() => {
-                          setSessionTimerSeconds(1200); // 20m
+                          setSessionTimerSeconds(1200); // 20 mins
                           setIsSessionActive(true);
                         }}
-                        className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white font-bold text-[11px] rounded-xl shadow-sm"
+                        className={`p-3 rounded-2xl border text-left transition-all ${
+                          sessionTimerSeconds >= 1200
+                            ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300'
+                            : 'bg-slate-800/80 border-slate-700 text-slate-200 hover:bg-slate-800'
+                        }`}
                       >
-                        ⏩ Skip to 20 Min (Unlock C4A)
+                        <div className="flex items-center justify-between">
+                          <span className="font-extrabold text-xs">20-Minute Threshold (C4A)</span>
+                          {sessionTimerSeconds >= 1200 ? (
+                            <span className="text-[10px] bg-emerald-500 text-slate-950 font-black px-2 py-0.5 rounded-md">UNLOCKED ✓</span>
+                          ) : (
+                            <span className="text-[10px] bg-amber-500/20 text-amber-400 font-bold px-2 py-0.5 rounded-md">⏩ Fast Forward</span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-1">Unlocks evaluation for Present C4A staff members.</p>
                       </button>
+
                       <button
                         type="button"
                         onClick={() => {
-                          setSessionTimerSeconds(1800); // 30m
+                          setSessionTimerSeconds(1800); // 30 mins
                           setIsSessionActive(true);
                         }}
-                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] rounded-xl shadow-sm"
+                        className={`p-3 rounded-2xl border text-left transition-all ${
+                          sessionTimerSeconds >= 1800
+                            ? 'bg-indigo-950/60 border-indigo-500/50 text-indigo-300'
+                            : 'bg-slate-800/80 border-slate-700 text-slate-200 hover:bg-slate-800'
+                        }`}
                       >
-                        ⏩ Skip to 30 Min (Unlock C4B)
+                        <div className="flex items-center justify-between">
+                          <span className="font-extrabold text-xs">30-Minute Threshold (C4B)</span>
+                          {sessionTimerSeconds >= 1800 ? (
+                            <span className="text-[10px] bg-indigo-500 text-white font-black px-2 py-0.5 rounded-md">UNLOCKED ✓</span>
+                          ) : (
+                            <span className="text-[10px] bg-indigo-500/20 text-indigo-400 font-bold px-2 py-0.5 rounded-md">⏩ Fast Forward</span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-1">Unlocks evaluation for Present C4B staff members.</p>
                       </button>
                     </div>
                   </div>
@@ -997,7 +1104,7 @@ export default function AdminPanelPage() {
                   {/* Sitting Staff Evaluation List */}
                   <div className="space-y-3">
                     <h4 className="font-extrabold text-slate-800 text-sm">
-                      Step 2: Attendance & Live Timer Evaluation ({selectedSittingIds.length} Sitting)
+                      Attendee Evaluation & Threshold Status ({selectedSittingIds.length} Sitting)
                     </h4>
 
                     {selectedSittingIds.map((consId) => {
@@ -1029,44 +1136,29 @@ export default function AdminPanelPage() {
                               <p className="text-slate-500 text-xs mt-0.5">{c.reason}</p>
                             </div>
 
-                            {/* Attendance Toggle (Present / Absent) */}
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => setDetentionAttendanceMap({ ...detentionAttendanceMap, [c.id]: 'PRESENT' })}
-                                className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all ${
-                                  attendance === 'PRESENT' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 border border-slate-200'
-                                }`}
-                              >
-                                Present
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setDetentionAttendanceMap({ ...detentionAttendanceMap, [c.id]: 'ABSENT' })}
-                                className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all ${
-                                  attendance === 'ABSENT' ? 'bg-rose-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 border border-slate-200'
-                                }`}
-                              >
-                                Absent
-                              </button>
-                            </div>
+                            <span className={`px-3 py-1 font-extrabold text-xs rounded-xl ${
+                              attendance === 'PRESENT' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                            }`}>
+                              {attendance === 'PRESENT' ? '✓ PRESENT' : '✕ ABSENT'}
+                            </span>
                           </div>
 
-                          {/* Live Timer Evaluation Controls */}
+                          {/* Evaluation Section */}
                           {attendance === 'ABSENT' ? (
-                            <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs font-bold">
-                              ✕ Marked ABSENT: Will automatically fail session and escalate ({isC4B ? 'C4B to C5A 2-Day Suspension' : 'C4A to C4B'}).
+                            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs font-bold flex items-center justify-between">
+                              <span>✕ Marked ABSENT: Will automatically fail session and escalate ({isC4B ? 'C4B to C5A 2-Day Suspension' : 'C4A to C4B'}).</span>
+                              <span className="px-2.5 py-1 bg-rose-600 text-white rounded-lg text-[10px] font-black uppercase">AUTO FAIL</span>
                             </div>
                           ) : (
                             <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
                               <div className="text-xs">
                                 {isUnlocked ? (
                                   <span className="text-emerald-700 font-extrabold flex items-center gap-1">
-                                    ✓ {requiredMinutes}-Minute Threshold Reached — Unlocked for Evaluation
+                                    ✓ {requiredMinutes}-Minute Threshold Reached — Evaluation Unlocked
                                   </span>
                                 ) : (
                                   <span className="text-amber-700 font-semibold flex items-center gap-1">
-                                    ⏳ Unlocks at {requiredMinutes}:00 mark (Currently {formatTimer(sessionTimerSeconds)})
+                                    ⏳ Locked until {requiredMinutes}:00 mark (Timer: {formatTimer(sessionTimerSeconds)})
                                   </span>
                                 )}
                               </div>
@@ -1077,7 +1169,7 @@ export default function AdminPanelPage() {
                                   disabled={!isUnlocked}
                                   onClick={() => setDetentionRegisterMap({ ...detentionRegisterMap, [c.id]: 'PASSED' })}
                                   className={`px-4 py-2 rounded-xl font-bold text-xs transition-all disabled:opacity-40 ${
-                                    currentEval === 'PASSED' ? 'bg-emerald-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200'
+                                    currentEval === 'PASSED' ? 'bg-emerald-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200 hover:bg-emerald-50'
                                   }`}
                                 >
                                   ✓ PASS (Clear {c.tier || c.type})
@@ -1088,7 +1180,7 @@ export default function AdminPanelPage() {
                                   disabled={!isUnlocked}
                                   onClick={() => setDetentionRegisterMap({ ...detentionRegisterMap, [c.id]: 'FAILED' })}
                                   className={`px-4 py-2 rounded-xl font-bold text-xs transition-all disabled:opacity-40 ${
-                                    currentEval === 'FAILED' ? 'bg-rose-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200'
+                                    currentEval === 'FAILED' ? 'bg-rose-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200 hover:bg-rose-50'
                                   }`}
                                 >
                                   ✕ FAIL ({isC4B ? 'Escalate to C5A 2-Day Suspension' : 'Escalate to C4B'})
@@ -1101,8 +1193,16 @@ export default function AdminPanelPage() {
                     })}
                   </div>
 
-                  {/* Final Submit Button */}
-                  <div className="flex justify-end pt-3">
+                  {/* Navigation & Final Submit Controls */}
+                  <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => setDetentionStage('REGISTER')}
+                      className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs"
+                    >
+                      ← Back to Attendance Register
+                    </button>
+
                     <button
                       type="submit"
                       disabled={detentionSubmitting}
