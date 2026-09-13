@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { getFlightsList, updateFlight, saveAllocation, createNotification } from '@/lib/firebase-db';
+import { getFlightsList, updateFlight, saveAllocation, createNotification, createConsequence } from '@/lib/firebase-db';
 
 export async function POST(request: Request) {
   const user = await getCurrentUser();
@@ -32,13 +32,36 @@ export async function POST(request: Request) {
       await saveAllocation(Number(flight_id), userId, 'ATTENDING', status as string);
       processedCount++;
 
-      const statusTitle = status === 'PRESENT' ? 'Present' : status === 'LATE' ? 'Late' : 'Absent';
-      await createNotification(
-        userId,
-        `Flight Attendance Recorded: ${statusTitle}`,
-        `Attendance registered for flight ${flight.flight_code}: Marked as ${statusTitle}.`,
-        status === 'PRESENT' ? 'SUCCESS' : status === 'LATE' ? 'WARNING' : 'INFO'
-      );
+      if (status === 'ABSENT') {
+        const timeframeDeadline = new Date();
+        timeframeDeadline.setDate(timeframeDeadline.getDate() + 7);
+
+        await createConsequence({
+          user_id: userId,
+          issuer_id: user.id,
+          tier: 'C4A',
+          type: 'DETENTION',
+          reason: `Absence from allocated flight (${flight.flight_code})`,
+          notes: `Automatically issued via attendance register for flight ${flight.flight_code}.`,
+          timeframe_deadline: timeframeDeadline.toISOString(),
+          status: 'ACTIVE',
+        });
+
+        await createNotification(
+          userId,
+          `Flight Attendance Recorded: Absent`,
+          `You were marked ABSENT for flight ${flight.flight_code}. A C4A (20 Minute Detention) sanction has been issued.`,
+          'WARNING'
+        );
+      } else {
+        const statusTitle = status === 'PRESENT' ? 'Present' : 'Late';
+        await createNotification(
+          userId,
+          `Flight Attendance Recorded: ${statusTitle}`,
+          `Attendance registered for flight ${flight.flight_code}: Marked as ${statusTitle} (+1 added to weekly quota).`,
+          'SUCCESS'
+        );
+      }
     }
 
     return NextResponse.json({ success: true, count: processedCount });

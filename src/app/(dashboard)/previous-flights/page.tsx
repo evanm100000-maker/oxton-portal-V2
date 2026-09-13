@@ -1,14 +1,13 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { Plane, Calendar, UserCheck, HelpCircle, UserX, Clock, ChevronDown, ChevronUp, CheckCircle2, AlertCircle, XCircle, ClipboardCheck, History } from 'lucide-react';
+import { Plane, Calendar, UserCheck, UserX, Clock, ChevronDown, ChevronUp, History, ClipboardCheck, CheckCircle2 } from 'lucide-react';
 import { formatDateLocal, isFlightPast } from '@/lib/utils';
 import { database } from '@/lib/firebase';
 import { ref, onValue } from 'firebase/database';
 import { parseFirebaseSnapshot } from '@/lib/realtime-sync';
 
-export default function AllocationsPage() {
+export default function PreviousFlightsPage() {
   const [user, setUser] = useState<any>(null);
   const [rawFlights, setRawFlights] = useState<any[]>([]);
   const [rawAllocations, setRawAllocations] = useState<any[]>([]);
@@ -23,26 +22,22 @@ export default function AllocationsPage() {
   const [registerMsg, setRegisterMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    // 1. Get current logged in user
     fetch(`/api/auth/me?t=${Date.now()}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
         if (data.user) setUser(data.user);
       });
 
-    // 2. Direct Firebase Realtime WebSockets Listener for Flights
     const unsubFlights = onValue(ref(database, 'flights'), (snapshot) => {
       setRawFlights(parseFirebaseSnapshot(snapshot));
       setLoading(false);
     });
 
-    // 3. Direct Firebase Realtime WebSockets Listener for Allocations
     const unsubAlloc = onValue(ref(database, 'allocations'), (snapshot) => {
       const val = snapshot.val();
       setRawAllocations(val ? Object.values(val).filter(Boolean) : []);
     });
 
-    // 4. Direct Firebase Realtime WebSockets Listener for Users
     const unsubUsers = onValue(ref(database, 'users'), (snapshot) => {
       setUsers(parseFirebaseSnapshot(snapshot));
     });
@@ -56,8 +51,8 @@ export default function AllocationsPage() {
 
   const activeStaff = users.filter((u) => u.status === 'ACTIVE');
 
-  // Compute enriched flights in real-time from snapshot data
-  const flights = rawFlights.map((flight) => {
+  // Compute enriched previous flights
+  const allFlights = rawFlights.map((flight) => {
     const flightAllocations = rawAllocations.filter((a: any) => Number(a.flight_id) === Number(flight.id));
 
     const enrichedAllocations = flightAllocations.map((alloc: any) => {
@@ -79,26 +74,14 @@ export default function AllocationsPage() {
     };
   });
 
-  const upcomingFlights = flights.filter((f) => !isFlightPast(f));
-  const pastFlightsCount = flights.filter((f) => isFlightPast(f)).length;
-
-  const handleAllocation = async (flightId: number, status: 'ATTENDING' | 'UNSURE' | 'ABSENT') => {
-    try {
-      await fetch('/api/allocations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ flight_id: flightId, status }),
-      });
-    } catch (err) {
-      console.error('Allocation update error:', err);
-    }
-  };
+  const previousFlights = allFlights
+    .filter((f) => isFlightPast(f))
+    .sort((a, b) => new Date(b.datetime_utc).getTime() - new Date(a.datetime_utc).getTime());
 
   const openRegisterModal = (flight: any) => {
     setSelectedRegisterFlight(flight);
     const initialMap: Record<number, 'PRESENT' | 'LATE' | 'ABSENT'> = {};
 
-    // Filter staff members who marked ATTENDING (coming) or already have a saved register status
     const registerStaff = activeStaff.filter((s) => {
       const existingAlloc = flight.allocations?.find((a: any) => Number(a.user_id) === Number(s.id));
       return existingAlloc && (existingAlloc.status === 'ATTENDING' || (existingAlloc.attendance_status && existingAlloc.attendance_status !== 'NONE'));
@@ -132,7 +115,7 @@ export default function AllocationsPage() {
       });
 
       if (res.ok) {
-        setRegisterMsg('Flight attendance register saved successfully!');
+        setRegisterMsg('Flight attendance register updated successfully!');
         setTimeout(() => {
           setSelectedRegisterFlight(null);
           setRegisterMsg(null);
@@ -145,48 +128,34 @@ export default function AllocationsPage() {
     }
   };
 
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'FOUNDER';
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-black text-slate-800 tracking-tight">Weekly Allocations</h1>
-          <p className="text-slate-500 font-medium text-sm mt-0.5">
-            View upcoming flight schedules and allocate your availability in real time. Updates automatically across all devices instantly.
-          </p>
+      <div>
+        <div className="flex items-center gap-3 text-slate-800">
+          <History className="w-8 h-8 text-purple-700" />
+          <h1 className="text-3xl font-black tracking-tight">Previous Flights Archive</h1>
         </div>
-
-        <Link
-          href="/previous-flights"
-          className="flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-purple-50 text-purple-700 font-bold rounded-2xl border border-purple-200 shadow-sm text-xs transition-all w-fit"
-        >
-          <History className="w-4 h-4 text-purple-600" />
-          View Previous Flights Archive ({pastFlightsCount})
-        </Link>
+        <p className="text-slate-500 font-medium text-sm mt-1">
+          Complete archive of past and completed flights. The day after a flight takes place, it is automatically saved here along with attendance registers.
+        </p>
       </div>
 
       {loading ? (
-        <div className="text-center py-12 text-slate-400">Loading flight schedule...</div>
-      ) : upcomingFlights.length === 0 ? (
-        <div className="bg-white rounded-3xl p-12 text-center text-slate-400 shadow-md border border-purple-100 space-y-3">
+        <div className="text-center py-12 text-slate-400">Loading previous flight records...</div>
+      ) : previousFlights.length === 0 ? (
+        <div className="bg-white rounded-3xl p-12 text-center text-slate-400 shadow-md border border-purple-100">
           <Plane className="w-12 h-12 mx-auto text-purple-300 mb-3 opacity-60" />
-          <p className="text-base font-semibold text-slate-700">No upcoming flights scheduled at this time.</p>
-          <p className="text-xs text-slate-400 mt-1">Check back soon when management updates the flight schedule.</p>
-          {pastFlightsCount > 0 && (
-            <div className="pt-2">
-              <Link href="/previous-flights" className="inline-flex items-center gap-1.5 font-bold text-xs text-purple-700 hover:text-purple-900 bg-purple-50 px-4 py-2 rounded-xl border border-purple-200">
-                <History className="w-4 h-4" /> View {pastFlightsCount} completed past flight(s) in Previous Flights Archive →
-              </Link>
-            </div>
-          )}
+          <p className="text-base font-semibold text-slate-700">No previous flights on record.</p>
+          <p className="text-xs text-slate-400 mt-1">Past flights will automatically appear here after their scheduled day ends.</p>
         </div>
       ) : (
         <div className="space-y-4">
-          {upcomingFlights.map((flight) => {
-            const attending = flight.allocations?.filter((a: any) => a.status === 'ATTENDING') || [];
-            const unsure = flight.allocations?.filter((a: any) => a.status === 'UNSURE') || [];
-            const absent = flight.allocations?.filter((a: any) => a.status === 'ABSENT') || [];
+          {previousFlights.map((flight) => {
+            const presentStaff = flight.allocations?.filter((a: any) => a.attendance_status === 'PRESENT' || a.attendance_status === 'LATE' || a.attended === 1) || [];
+            const absentStaff = flight.allocations?.filter((a: any) => a.attendance_status === 'ABSENT') || [];
             const isExpanded = expandedFlightId === flight.id;
-            const isAdmin = user?.role === 'ADMIN' || user?.role === 'FOUNDER';
 
             return (
               <div key={flight.id} className="bg-white rounded-3xl p-6 shadow-md border border-purple-100 space-y-4 transition-all hover:shadow-lg">
@@ -196,8 +165,8 @@ export default function AllocationsPage() {
                       <span className="px-3 py-1 bg-purple-100 text-purple-800 font-extrabold text-sm rounded-full border border-purple-200">
                         {flight.flight_code}
                       </span>
-                      <span className="text-xs font-semibold px-2.5 py-0.5 bg-blue-50 text-blue-700 rounded-md border border-blue-100">
-                        {flight.status}
+                      <span className="text-xs font-semibold px-2.5 py-0.5 bg-slate-100 text-slate-700 rounded-md border border-slate-200 uppercase">
+                        {flight.status === 'COMPLETED' ? 'COMPLETED' : 'PAST FLIGHT'}
                       </span>
                     </div>
                     <h3 className="text-xl font-bold text-slate-800">{flight.aircraft}</h3>
@@ -210,86 +179,56 @@ export default function AllocationsPage() {
                     </div>
                   </div>
 
-                  {/* Right Action Cluster */}
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-2">
                     {isAdmin && (
                       <button
                         onClick={() => openRegisterModal(flight)}
-                        className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold rounded-xl text-xs shadow-md shadow-purple-600/20 transition-all mr-2"
+                        className="flex items-center gap-1.5 px-4 py-2 bg-purple-100 hover:bg-purple-200 text-purple-800 font-bold rounded-xl text-xs transition-all"
                       >
                         <ClipboardCheck className="w-4 h-4" />
-                        Attendance Register
+                        Edit Register
                       </button>
                     )}
-
-                    <button
-                      onClick={() => handleAllocation(flight.id, 'ATTENDING')}
-                      className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                        flight.my_status === 'ATTENDING'
-                          ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
-                          : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'
-                      }`}
-                    >
-                      <UserCheck className="w-4 h-4" />
-                      Attending
-                    </button>
-
-                    <button
-                      onClick={() => handleAllocation(flight.id, 'UNSURE')}
-                      className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                        flight.my_status === 'UNSURE'
-                          ? 'bg-amber-500 text-white shadow-md shadow-amber-500/20'
-                          : 'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200'
-                      }`}
-                    >
-                      <HelpCircle className="w-4 h-4" />
-                      Unsure
-                    </button>
-
-                    <button
-                      onClick={() => handleAllocation(flight.id, 'ABSENT')}
-                      className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                        flight.my_status === 'ABSENT'
-                          ? 'bg-rose-600 text-white shadow-md shadow-rose-500/20'
-                          : 'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200'
-                      }`}
-                    >
-                      <UserX className="w-4 h-4" />
-                      Absent
-                    </button>
                   </div>
                 </div>
 
-                {/* Allocated Staff Summary */}
+                {/* Attendance Summary */}
                 <div className="border-t border-purple-100 pt-4 flex items-center justify-between">
                   <div className="flex items-center gap-4 text-xs font-semibold text-slate-600">
-                    <span className="text-emerald-700">✓ {attending.length} Attending</span>
-                    <span className="text-amber-700">? {unsure.length} Unsure</span>
-                    <span className="text-rose-700">✕ {absent.length} Absent</span>
+                    <span className="text-emerald-700 flex items-center gap-1">
+                      <UserCheck className="w-3.5 h-3.5" /> {presentStaff.length} Present / Late (+1 Quota)
+                    </span>
+                    <span className="text-rose-700 flex items-center gap-1">
+                      <UserX className="w-3.5 h-3.5" /> {absentStaff.length} Absent (C4A Issued)
+                    </span>
                   </div>
 
                   <button
                     onClick={() => setExpandedFlightId(isExpanded ? null : flight.id)}
                     className="text-xs font-bold text-purple-700 hover:text-purple-900 flex items-center gap-1"
                   >
-                    {isExpanded ? 'Hide Roster' : 'View Staff Roster'}
+                    {isExpanded ? 'Hide Register' : 'View Full Register'}
                     {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   </button>
                 </div>
 
-                {/* Expanded Roster Breakdown */}
+                {/* Expanded Register Details */}
                 {isExpanded && (
-                  <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100 mt-3 grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                     <div>
-                      <h4 className="font-bold text-emerald-800 mb-2 border-b border-emerald-200 pb-1">Attending ({attending.length})</h4>
-                      {attending.length === 0 ? (
-                        <p className="text-slate-400 italic">None</p>
+                      <h4 className="font-bold text-emerald-800 mb-2 border-b border-emerald-200 pb-1 flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> Attended / Present ({presentStaff.length})
+                      </h4>
+                      {presentStaff.length === 0 ? (
+                        <p className="text-slate-400 italic">No staff recorded present.</p>
                       ) : (
                         <div className="space-y-1">
-                          {attending.map((a: any) => (
+                          {presentStaff.map((a: any) => (
                             <div key={a.user_id} className="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-100">
                               <span className="font-semibold text-slate-800">{a.preferred_name}</span>
-                              <span className="text-[10px] bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded font-bold">{a.role}</span>
+                              <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-bold uppercase">
+                                {a.attendance_status || 'PRESENT'} (+1 Quota)
+                              </span>
                             </div>
                           ))}
                         </div>
@@ -297,31 +236,19 @@ export default function AllocationsPage() {
                     </div>
 
                     <div>
-                      <h4 className="font-bold text-amber-800 mb-2 border-b border-amber-200 pb-1">Unsure ({unsure.length})</h4>
-                      {unsure.length === 0 ? (
-                        <p className="text-slate-400 italic">None</p>
+                      <h4 className="font-bold text-rose-800 mb-2 border-b border-rose-200 pb-1 flex items-center gap-1">
+                        <UserX className="w-3.5 h-3.5" /> Absent ({absentStaff.length})
+                      </h4>
+                      {absentStaff.length === 0 ? (
+                        <p className="text-slate-400 italic">No absent staff recorded.</p>
                       ) : (
                         <div className="space-y-1">
-                          {unsure.map((a: any) => (
+                          {absentStaff.map((a: any) => (
                             <div key={a.user_id} className="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-100">
                               <span className="font-semibold text-slate-800">{a.preferred_name}</span>
-                              <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold">{a.role}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div>
-                      <h4 className="font-bold text-rose-800 mb-2 border-b border-rose-200 pb-1">Absent ({absent.length})</h4>
-                      {absent.length === 0 ? (
-                        <p className="text-slate-400 italic">None</p>
-                      ) : (
-                        <div className="space-y-1">
-                          {absent.map((a: any) => (
-                            <div key={a.user_id} className="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-100">
-                              <span className="font-semibold text-slate-800">{a.preferred_name}</span>
-                              <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold">{a.role}</span>
+                              <span className="text-[10px] bg-rose-100 text-rose-800 px-2 py-0.5 rounded font-bold uppercase">
+                                ABSENT (C4A)
+                              </span>
                             </div>
                           ))}
                         </div>
@@ -342,7 +269,7 @@ export default function AllocationsPage() {
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-lg font-bold text-slate-800">Attendance Register: {selectedRegisterFlight.flight_code}</h3>
-                <p className="text-xs text-slate-500">Mark staff members as Present, Late, or Absent for this flight.</p>
+                <p className="text-xs text-slate-500">Update attendance register status for this past flight.</p>
               </div>
               <button onClick={() => setSelectedRegisterFlight(null)} className="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
             </div>
@@ -364,7 +291,6 @@ export default function AllocationsPage() {
                   return (
                     <div className="p-8 text-center text-slate-400 space-y-1">
                       <p className="font-bold text-slate-700 text-sm">No Staff Members Marked Attending</p>
-                      <p className="text-xs">Only staff members who mark "ATTENDING" (coming) on this flight appear in the register.</p>
                     </div>
                   );
                 }

@@ -20,7 +20,8 @@ import {
   CheckCircle2,
   AlertOctagon,
   Settings,
-  FileText
+  FileText,
+  History
 } from 'lucide-react';
 import { database } from '@/lib/firebase';
 import { ref, onValue } from 'firebase/database';
@@ -222,6 +223,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const navItems = [
     { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { label: 'Allocations', href: '/allocations', icon: CalendarDays },
+    { label: 'Previous Flights', href: '/previous-flights', icon: History },
     { label: 'Flight Logs', href: '/flight-logs', icon: FileText },
     { label: 'Staff Directory', href: '/staff', icon: Users },
     { label: 'LOA / Reduced', href: '/loa', icon: Clock },

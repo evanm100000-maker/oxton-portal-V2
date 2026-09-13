@@ -47,6 +47,7 @@ export default function AdminPanelPage() {
 
   const [users, setUsers] = useState<any[]>([]);
   const [flights, setFlights] = useState<any[]>([]);
+  const [rawAllocations, setRawAllocations] = useState<any[]>([]);
   const [flightLogs, setFlightLogs] = useState<any[]>([]);
   const [detentions, setDetentions] = useState<any[]>([]);
   const [loaRequests, setLoaRequests] = useState<any[]>([]);
@@ -108,6 +109,7 @@ export default function AdminPanelPage() {
     // Attach direct Firebase WebSockets listeners for instant real-time sync across all devices
     const unsubUsers = onValue(ref(database, 'users'), (snap) => setUsers(parseFirebaseSnapshot(snap)));
     const unsubFlights = onValue(ref(database, 'flights'), (snap) => setFlights(parseFirebaseSnapshot(snap)));
+    const unsubAlloc = onValue(ref(database, 'allocations'), (snap) => setRawAllocations(snap.val() ? Object.values(snap.val()).filter(Boolean) : []));
     const unsubLogs = onValue(ref(database, 'flight_logs'), (snap) => setFlightLogs(parseFirebaseSnapshot(snap)));
     const unsubDetentions = onValue(ref(database, 'detentions'), (snap) => setDetentions(parseFirebaseSnapshot(snap)));
     const unsubLoa = onValue(ref(database, 'loa_requests'), (snap) => setLoaRequests(parseFirebaseSnapshot(snap)));
@@ -140,6 +142,7 @@ export default function AdminPanelPage() {
     return () => {
       unsubUsers();
       unsubFlights();
+      unsubAlloc();
       unsubLogs();
       unsubDetentions();
       unsubLoa();
@@ -239,13 +242,15 @@ export default function AdminPanelPage() {
     setSelectedFlight(flight);
     const initialMap: Record<number, 'PRESENT' | 'LATE' | 'ABSENT'> = {};
 
+    const flightAllocations = rawAllocations.filter((a: any) => Number(a.flight_id) === Number(flight.id));
+
     const registerStaff = activeStaff.filter((s) => {
-      const existingAlloc = flight.allocations?.find((a: any) => Number(a.user_id) === Number(s.id));
+      const existingAlloc = flightAllocations.find((a: any) => Number(a.user_id) === Number(s.id));
       return existingAlloc && (existingAlloc.status === 'ATTENDING' || (existingAlloc.attendance_status && existingAlloc.attendance_status !== 'NONE'));
     });
 
     registerStaff.forEach((s) => {
-      const existingAlloc = flight.allocations?.find((a: any) => Number(a.user_id) === Number(s.id));
+      const existingAlloc = flightAllocations.find((a: any) => Number(a.user_id) === Number(s.id));
       if (existingAlloc && existingAlloc.attendance_status && existingAlloc.attendance_status !== 'NONE') {
         initialMap[s.id] = existingAlloc.attendance_status;
       } else {
@@ -1159,8 +1164,9 @@ export default function AdminPanelPage() {
 
             <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
               {(() => {
+                const flightAllocations = rawAllocations.filter((a: any) => Number(a.flight_id) === Number(selectedFlight?.id));
                 const attendingStaff = activeStaff.filter((s) => {
-                  const existingAlloc = selectedFlight?.allocations?.find((a: any) => Number(a.user_id) === Number(s.id));
+                  const existingAlloc = flightAllocations.find((a: any) => Number(a.user_id) === Number(s.id));
                   return existingAlloc && (existingAlloc.status === 'ATTENDING' || (existingAlloc.attendance_status && existingAlloc.attendance_status !== 'NONE'));
                 });
 
