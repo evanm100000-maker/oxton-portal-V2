@@ -391,10 +391,13 @@ export default function AdminPanelPage() {
     const sittingCons = consequences.filter((c) => selectedSittingIds.includes(c.id));
 
     const entries = sittingCons.map((c) => {
+      const u = activeStaff.find((usr) => Number(usr.id) === Number(c.user_id));
+      const staffName = u?.preferred_name || (u?.roblox_username ? `@${u.roblox_username}` : `User #${c.user_id}`);
       const attendance = detentionAttendanceMap[c.id] || 'PRESENT';
       if (attendance === 'ABSENT') {
         return {
           user_id: c.user_id,
+          user_name: staffName,
           consequence_id: c.id,
           status: 'FAILED',
           notes: 'Marked ABSENT for detention session',
@@ -402,6 +405,7 @@ export default function AdminPanelPage() {
       }
       return {
         user_id: c.user_id,
+        user_name: staffName,
         consequence_id: c.id,
         status: detentionRegisterMap[c.id] || 'PASSED',
         notes: `Session timer: ${formatTimer(sessionTimerSeconds)}`,
@@ -1230,13 +1234,17 @@ export default function AdminPanelPage() {
                     </div>
                     {s.notes && <p className="text-slate-600">Notes: {s.notes}</p>}
                     <div className="pt-2 flex flex-wrap gap-2">
-                      {s.entries?.map((e: any, idx: number) => (
-                        <span key={idx} className={`px-2.5 py-1 rounded-md font-bold text-[10px] ${
-                          e.status === 'PASSED' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-                        }`}>
-                          User #{e.user_id}: {e.status}
-                        </span>
-                      ))}
+                      {s.entries?.map((e: any, idx: number) => {
+                        const targetUser = users.find((usr) => Number(usr.id) === Number(e.user_id));
+                        const name = e.user_name || (targetUser ? (targetUser.preferred_name || `@${targetUser.roblox_username}`) : `User #${e.user_id}`);
+                        return (
+                          <span key={idx} className={`px-2.5 py-1 rounded-md font-bold text-[10px] ${
+                            e.status === 'PASSED' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                          }`}>
+                            {name}: {e.status}
+                          </span>
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
