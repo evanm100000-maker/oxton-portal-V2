@@ -6,7 +6,7 @@ import { Plane, Calendar, Megaphone, CheckCircle, Clock, ShieldAlert, ChevronRig
 import { formatDateLocal } from '@/lib/utils';
 import { database } from '@/lib/firebase';
 import { ref, onValue } from 'firebase/database';
-import { parseFirebaseSnapshot } from '@/lib/realtime-sync';
+import { parseFirebaseSnapshot, deduplicateConsequences } from '@/lib/realtime-sync';
 
 export default function DashboardPage() {
   const [user, setUser] = useState<any>(null);
@@ -33,7 +33,7 @@ export default function DashboardPage() {
     });
     const unsubLogs = onValue(ref(database, 'flight_logs'), (snap) => setRawLogs(parseFirebaseSnapshot(snap)));
     const unsubLoa = onValue(ref(database, 'loa_requests'), (snap) => setRawLoa(parseFirebaseSnapshot(snap)));
-    const unsubCons = onValue(ref(database, 'consequences'), (snap) => setRawConsequences(parseFirebaseSnapshot(snap)));
+    const unsubCons = onValue(ref(database, 'consequences'), (snap) => setRawConsequences(deduplicateConsequences(parseFirebaseSnapshot(snap))));
     const unsubAnn = onValue(ref(database, 'announcements'), (snap) => {
       const list = parseFirebaseSnapshot(snap);
       list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());

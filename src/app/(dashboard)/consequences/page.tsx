@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Shield, CheckCircle, AlertTriangle, Clock, Calendar, CheckCircle2, AlertOctagon } from 'lucide-react';
 import { database } from '@/lib/firebase';
 import { ref, onValue } from 'firebase/database';
-import { parseFirebaseSnapshot } from '@/lib/realtime-sync';
+import { parseFirebaseSnapshot, deduplicateConsequences } from '@/lib/realtime-sync';
 
 const TIER_DESCRIPTIONS: Record<string, { label: string; badgeClass: string }> = {
   C1: { label: 'C1 - Warning', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200' },
@@ -37,7 +37,7 @@ export default function ConsequencesPage() {
     // 2. Direct Firebase WebSocket listener for Consequences
     const unsubCons = onValue(ref(database, 'consequences'), (snapshot) => {
       const parsed = parseFirebaseSnapshot(snapshot);
-      setConsequences(parsed);
+      setConsequences(deduplicateConsequences(parsed));
       setLoading(false);
     });
 

@@ -293,11 +293,25 @@ export async function updateTicket(id: number, updates: any): Promise<void> {
 }
 
 // --- CONSEQUENCES ---
+function deduplicateConsequencesList(list: any[]): any[] {
+  if (!Array.isArray(list)) return [];
+  const map = new Map<string, any>();
+  for (const item of list) {
+    if (!item) continue;
+    const timeKey = item.created_at ? Math.floor(new Date(item.created_at).getTime() / 60000) : 'notime';
+    const sig = `${item.user_id}_${item.tier || item.type}_${(item.reason || '').trim().toLowerCase()}_${timeKey}`;
+    if (!map.has(sig)) {
+      map.set(sig, item);
+    }
+  }
+  return Array.from(map.values());
+}
+
 export async function getConsequencesList(): Promise<any[]> {
   const data = await fbFetch('consequences');
   if (!data) return [];
   const list = Object.values(data).filter(Boolean) as any[];
-  return deduplicateById(list);
+  return deduplicateConsequencesList(deduplicateById(list));
 }
 
 export async function createConsequence(consData: any): Promise<any> {

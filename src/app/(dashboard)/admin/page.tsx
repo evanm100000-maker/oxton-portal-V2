@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { database } from '@/lib/firebase';
 import { ref, onValue } from 'firebase/database';
-import { parseFirebaseSnapshot } from '@/lib/realtime-sync';
+import { parseFirebaseSnapshot, deduplicateConsequences } from '@/lib/realtime-sync';
 
 const TIER_OPTIONS = [
   { value: 'C1', label: 'C1 - Warning' },
@@ -81,6 +81,7 @@ export default function AdminPanelPage() {
   const [consNotes, setConsNotes] = useState('');
   const [consDeadline, setConsDeadline] = useState('');
   const [consDays, setConsDays] = useState('2');
+  const [isSubmittingCons, setIsSubmittingCons] = useState(false);
 
   // Detention session creation state
   const [detentionDate, setDetentionDate] = useState(new Date().toISOString().split('T')[0]);
@@ -112,7 +113,7 @@ export default function AdminPanelPage() {
     const unsubLoa = onValue(ref(database, 'loa_requests'), (snap) => setLoaRequests(parseFirebaseSnapshot(snap)));
     const unsubTickets = onValue(ref(database, 'tickets'), (snap) => setTickets(parseFirebaseSnapshot(snap)));
     const unsubReports = onValue(ref(database, 'reports'), (snap) => setReports(parseFirebaseSnapshot(snap)));
-    const unsubCons = onValue(ref(database, 'consequences'), (snap) => setConsequences(parseFirebaseSnapshot(snap)));
+    const unsubCons = onValue(ref(database, 'consequences'), (snap) => setConsequences(deduplicateConsequences(parseFirebaseSnapshot(snap))));
     const unsubAnn = onValue(ref(database, 'announcements'), (snap) => setAnnouncements(parseFirebaseSnapshot(snap)));
 
     const unsubSettings = onValue(ref(database, 'settings'), (snap) => {
@@ -285,40 +286,50 @@ export default function AdminPanelPage() {
   // Issue Consequence Handler
   const handleIssueConsequence = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!consUserId) return;
+    if (!consUserId || isSubmittingCons) return;
 
-    let expiresAt: string | null = null;
-    if (consTier === 'C5A' && consDays) {
-      const days = parseInt(consDays);
-      const exp = new Date();
-      exp.setDate(exp.getDate() + days);
-      expiresAt = exp.toISOString();
-    }
+    setIsSubmittingCons(true);
+    try {
+      let expiresAt: string | null = null;
+      if (consTier === 'C5A' && consDays) {
+        const days = parseInt(consDays);
+        const exp = new Date();
+        exp.setDate(exp.getDate() + days);
+        expiresAt = exp.toISOString();
+      }
 
-    let deadlineIso: string | null = null;
-    if ((consTier === 'C4A' || consTier === 'C4B') && consDeadline) {
-      deadlineIso = new Date(consDeadline).toISOString();
-    }
+      let deadlineIso: string | null = null;
+      if ((consTier === 'C4A' || consTier === 'C4B') && consDeadline) {
+        deadlineIso = new Date(consDeadline).toISOString();
+      }
 
-    const res = await fetch('/api/consequences', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        user_id: consUserId,
-        tier: consTier,
-        reason: consReason,
-        notes: consNotes,
-        timeframe_deadline: deadlineIso,
-        expires_at: expiresAt,
-      }),
-    });
+      const res = await fetch('/api/consequences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: consUserId,
+          tier: consTier,
+          reason: consReason,
+          notes: consNotes,
+          timeframe_deadline: deadlineIso,
+          expires_at: expiresAt,
+        }),
+      });
 
-    if (res.ok) {
-      setFeedback(`Disciplinary consequence (${consTier}) successfully issued!`);
-      setConsReason('');
-      setConsNotes('');
-      setConsUserId('');
-      setConsDeadline('');
+      if (res.ok) {
+        setFeedback(`Disciplinary consequence (${consTier}) successfully issued!`);
+        setConsReason('');
+        setConsNotes('');
+        setConsUserId('');
+        setConsDeadline('');
+      } else {
+        const data = await res.json();
+        alert(`Failed to issue consequence: ${data.error || 'Unknown error'}`);
+      }
+    } catch (err: any) {
+      alert(`Error issuing consequence: ${err.message}`);
+    } finally {
+      setIsSubmittingCons(false);
     }
   };
 
@@ -980,8 +991,12 @@ export default function AdminPanelPage() {
               </div>
 
               <div className="md:col-span-3 flex justify-end">
-                <button type="submit" className="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md">
-                  Issue Disciplinary Consequence
+                <button
+                  type="submit"
+                  disabled={isSubmittingCons}
+                  className="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-bold rounded-xl shadow-md"
+                >
+                  {isSubmittingCons ? 'Issuing Consequence...' : 'Issue Disciplinary Consequence'}
                 </button>
               </div>
             </form>

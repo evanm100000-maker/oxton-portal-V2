@@ -60,6 +60,22 @@ export async function POST(request: Request) {
     const consTier = tier; // 'C1' | 'C2' | 'C3' | 'C4A' | 'C4B' | 'C5A' | 'C5B'
     const consType = consTier.startsWith('C5') ? 'SUSPENSION' : consTier.startsWith('C4') ? 'DETENTION' : consTier === 'C3' ? 'INFORMAL_SANCTION' : 'WARNING';
 
+    // Prevent rapid duplicate creation (within 15 seconds)
+    const existingList = await getConsequencesList();
+    const now = Date.now();
+    const recentDuplicate = existingList.find((c: any) => {
+      if (Number(c.user_id) !== Number(user_id)) return false;
+      if ((c.tier || c.type) !== consTier && c.tier !== consTier) return false;
+      if (c.reason !== reason) return false;
+      if (!c.created_at) return false;
+      const diff = Math.abs(now - new Date(c.created_at).getTime());
+      return diff < 15000;
+    });
+
+    if (recentDuplicate) {
+      return NextResponse.json({ consequence: recentDuplicate, duplicateIgnored: true }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+    }
+
     const consData = {
       user_id: Number(user_id),
       issuer_id: user.id,
