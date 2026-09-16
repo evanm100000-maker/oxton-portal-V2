@@ -124,11 +124,12 @@ export default function FlightLogsPage() {
         }),
       });
 
-      if (res.ok) {
-        setFeedback(`Flight log ${action === 'ACCEPT' ? 'ACCEPTED' : 'REJECTED'}.`);
-        setReviewLog(null);
-        setAdminNotes('');
-      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to review log');
+
+      setFeedback(`Flight log ${action === 'ACCEPT' ? 'ACCEPTED' : 'REJECTED'}.`);
+      setReviewLog(null);
+      setAdminNotes('');
     } catch (err: any) {
       setFeedback(`Review Error: ${err.message}`);
     } finally {

@@ -1,24 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getFlightLogsList, createFlightLog, updateFlightLog, createNotification, getFlightsList } from '@/lib/firebase-db';
-import jwt from 'jsonwebtoken';
-import { cookies } from 'next/headers';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'luma-staff-portal-secret-key-2024';
-
-async function getUserFromToken() {
-  const token = cookies().get('auth_token')?.value;
-  if (!token) return null;
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
-    return decoded;
-  } catch (err) {
-    return null;
-  }
-}
+import { getCurrentUser } from '@/lib/auth';
 
 export async function GET() {
-  const user = await getUserFromToken();
+  const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -38,7 +24,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const user = await getUserFromToken();
+  const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -100,7 +86,7 @@ export async function POST(req: Request) {
 }
 
 export async function PUT(req: Request) {
-  const user = await getUserFromToken();
+  const user = await getCurrentUser();
   if (!user || (user.role !== 'ADMIN' && user.role !== 'FOUNDER')) {
     return NextResponse.json({ error: 'Unauthorized. Admin access required.' }, { status: 403 });
   }
